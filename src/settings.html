@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8"/>
+  <title>GPT Agent 设置</title>
+  <style>
+    :root {
+      --bg:#0f0f0f;--bg2:#1a1a1a;--bg3:#242424;--border:#2e2e2e;
+      --text:#e8e8e8;--text2:#999;--accent:#10a37f;--danger:#e54b4b;
+      --radius:8px;--font:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+    }
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:var(--font);background:var(--bg);color:var(--text);padding:24px;max-width:580px;margin:0 auto}
+    h1{font-size:18px;margin-bottom:24px}
+    h2{font-size:12px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:12px}
+    .section{margin-bottom:28px}
+    .card{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:16px;display:flex;flex-direction:column;gap:14px}
+    .field{display:flex;flex-direction:column;gap:6px}
+    label{font-size:12px;color:var(--text2)}
+    input,select,textarea{background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:8px 10px;font-size:13px;font-family:var(--font);outline:none;transition:border-color .15s;width:100%}
+    input:focus,select:focus,textarea:focus{border-color:var(--accent)}
+    textarea{resize:vertical;min-height:100px}
+    .hint{font-size:11px;color:var(--text2);line-height:1.6}
+    .auth-tabs{display:flex;border:1px solid var(--border);border-radius:6px;overflow:hidden}
+    .auth-tab{flex:1;padding:8px;text-align:center;cursor:pointer;font-size:12px;color:var(--text2);background:var(--bg3);border:none;transition:all .15s}
+    .auth-tab.active{background:var(--accent);color:#fff}
+    .auth-section{display:none;flex-direction:column;gap:14px}
+    .auth-section.active{display:flex}
+    .row{display:flex;gap:10px}
+    .row .field{flex:1}
+    .range-row{display:flex;align-items:center;gap:8px}
+    .range-row input[type=range]{flex:1;accent-color:var(--accent)}
+    .range-val{font-size:12px;color:var(--accent);min-width:52px;text-align:right}
+    .prompts-list{display:flex;flex-direction:column;gap:8px}
+    .prompt-row{display:flex;gap:8px}
+    .prompt-row input{flex:1}
+    .remove-btn{background:none;border:1px solid var(--border);color:var(--text2);border-radius:4px;padding:4px 8px;cursor:pointer;font-size:11px;white-space:nowrap}
+    .remove-btn:hover{border-color:var(--danger);color:var(--danger)}
+    .add-btn{background:none;border:1px dashed var(--border);color:var(--text2);border-radius:6px;padding:8px;cursor:pointer;font-size:12px;width:100%;transition:all .15s}
+    .add-btn:hover{border-color:var(--accent);color:var(--accent)}
+    .save-btn{padding:10px 28px;background:var(--accent);border:none;color:#fff;border-radius:6px;cursor:pointer;font-size:14px;transition:background .15s}
+    .save-btn:hover{background:#0d8a6b}
+    .toast{position:fixed;bottom:20px;right:20px;background:var(--accent);color:#fff;padding:10px 16px;border-radius:6px;font-size:13px;opacity:0;transition:opacity .3s;pointer-events:none}
+    .toast.show{opacity:1}
+  </style>
+</head>
+<body>
+  <h1>⚙️ GPT Browser Agent 设置</h1>
+
+  <div class="section">
+    <h2>认证方式</h2>
+    <div class="card">
+      <div class="auth-tabs">
+        <button class="auth-tab active" data-mode="apikey">🔑 API Key</button>
+        <button class="auth-tab" data-mode="chatgpt">💬 ChatGPT 账号</button>
+      </div>
+      <div class="auth-section active" id="section-apikey">
+        <div class="field">
+          <label>OpenAI API Key</label>
+          <input type="password" id="apiKey" placeholder="sk-..." autocomplete="off"/>
+        </div>
+        <div class="field">
+          <label>模型</label>
+          <select id="model">
+            <option value="gpt-4o">gpt-4o（推荐，支持视觉）</option>
+            <option value="gpt-4o-mini">gpt-4o-mini（快速省钱）</option>
+            <option value="gpt-4-turbo">gpt-4-turbo</option>
+            <option value="o1-preview">o1-preview</option>
+          </select>
+        </div>
+        <p class="hint">API Key 仅存储在本地 Chrome storage，不会上传任何服务器。</p>
+      </div>
+      <div class="auth-section" id="section-chatgpt">
+        <p class="hint">
+          借用你在 chatgpt.com 已登录的 session token 调用 API，无需额外配置。<br/>
+          ⚠️ 稳定性不如 API Key，且受账号速率限制。建议优先使用 API Key。
+        </p>
+        <div class="field">
+          <label>模型</label>
+          <select id="modelSession">
+            <option value="gpt-4o">gpt-4o</option>
+            <option value="gpt-4o-mini">gpt-4o-mini</option>
+          </select>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>系统提示词</h2>
+    <div class="card">
+      <textarea id="systemPrompt" rows="5" placeholder="自定义 AI 的行为..."></textarea>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>🛡️ 风控保护</h2>
+    <div class="card">
+      <div class="row">
+        <div class="field">
+          <label>最小操作延迟</label>
+          <div class="range-row">
+            <input type="range" id="delayMin" min="200" max="5000" step="100" value="800"/>
+            <span class="range-val" id="delayMinVal">800ms</span>
+          </div>
+        </div>
+        <div class="field">
+          <label>最大操作延迟</label>
+          <div class="range-row">
+            <input type="range" id="delayMax" min="500" max="10000" step="100" value="2500"/>
+            <span class="range-val" id="delayMaxVal">2500ms</span>
+          </div>
+        </div>
+      </div>
+      <div class="field">
+        <label>每分钟最多操作次数</label>
+        <div class="range-row">
+          <input type="range" id="maxActions" min="3" max="30" step="1" value="12"/>
+          <span class="range-val" id="maxActionsVal">12 次/分</span>
+        </div>
+        <p class="hint">超过频率上限后自动暂停等待，降低被风控识别风险。每次操作加入随机抖动模拟人工节奏。</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>快捷 Prompts</h2>
+    <div class="card">
+      <div class="prompts-list" id="promptsList"></div>
+      <button class="add-btn" id="addPromptBtn">＋ 添加快捷指令</button>
+    </div>
+  </div>
+
+  <button class="save-btn" id="saveBtn">保存设置</button>
+  <div class="toast" id="toast">✓ 设置已保存</div>
+
+  <script type="module" src="settings.js"></script>
+</body>
+</html>
