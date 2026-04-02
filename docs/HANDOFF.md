@@ -122,43 +122,56 @@ Stored in `chrome.storage.local` under `Settings.skills`. Each skill has:
 
 ---
 
-## 6. Next Task: Data Collection System
+## 6. Current Next Task: Tab Targeting + URL Navigation
 
-**This is the next planned feature — not yet started.**
+**In progress.** Plan file: `/Users/vyodels/.claude/plans/curious-yawning-turing.md`
 
-### What needs to be built
-A structured data collection and export system for the interview/recruiting use case:
+### Problem
+The sidepanel always routes to `{ active: true, currentWindow: true }` — unreliable when the sidebar itself has focus. No way to navigate to a URL from within the sidepanel.
 
-**User decisions already made:**
-1. **Fields**: AI auto-extracts if no Skill defines fields; if a Skill specifies fields, use those
-2. **Storage**: IndexedDB (persists across sidebar close, survives browser restarts)
-3. **Export**: Local file download — both JSON and CSV
-4. **User control**: User explicitly triggers data capture (not automatic); can be via chat or skill button
+### What's being built
+- `targetTabId` state in sidepanel — explicit tab targeting
+- Tab indicator bar: favicon + title + 🎯 lock / ✕ unlock buttons
+- URL navigation bar: input + → button to navigate without leaving sidepanel
+- `resolveTab(targetTabId?)` helper in `background.ts` — all 4 handlers use it
+- `GET_ACTIVE_TAB` new message type
 
-### Suggested plan structure
-- `src/collector.ts` — new module: `CollectedRecord` type, IndexedDB read/write, JSON/CSV export
+### Files touched
+`src/types.ts`, `src/background.ts`, `src/sidepanel.html`, `src/sidepanel.ts`
+
+---
+
+## 7. Upcoming Task: Data Collection System
+
+**Not started.** After tab targeting is complete.
+
+**Decisions:**
+1. **Fields**: AI auto-extracts by default; Skill-defined fields take priority
+2. **Storage**: IndexedDB
+3. **Export**: JSON + CSV local download
+4. **Trigger**: Always user-controlled (button or chat), never automatic
+
+**Suggested plan:**
+- `src/collector.ts` — `CollectedRecord` type, IndexedDB read/write, JSON/CSV export
 - `src/types.ts` — add `CollectedRecord` interface
 - `src/sidepanel.html` — new "📊 数据" tab panel
-- `src/sidepanel.ts` — wire up collector, add data panel render + export buttons
+- `src/sidepanel.ts` — wire up collector + export buttons
 
-### CollectedRecord shape (proposed)
 ```typescript
 interface CollectedRecord {
   id: string
   timestamp: number
   pageUrl: string
   pageTitle: string
-  fields: Record<string, string>   // AI-extracted or skill-defined key-value pairs
-  rawText?: string                 // full page text at time of capture
-  skillUsed?: string               // skill name that triggered the capture
+  fields: Record<string, string>
+  rawText?: string
+  skillUsed?: string
 }
 ```
 
-**Plan file location:** `docs/superpowers/plans/` (create new plan file for data collection)
-
 ---
 
-## 7. Key Product Decisions (for context)
+## 8. Key Product Decisions (for context)
 
 | Decision | Choice |
 |----------|--------|
@@ -173,7 +186,7 @@ interface CollectedRecord {
 
 ---
 
-## 8. How to Resume on a New Machine
+## 9. How to Resume on a New Machine
 
 ```bash
 # 1. Clone / pull repo
@@ -197,16 +210,15 @@ npm run build
 # chrome://extensions → Developer Mode → Load unpacked → select dist/
 
 # 7. Next step
-# Start the data collection plan:
-# Create: docs/superpowers/plans/2026-04-02-data-collection.md
-# Then execute with subagent-driven-development skill
+# Tab targeting feature is in progress (plan: ~/.claude/plans/curious-yawning-turing.md)
+# After that: data collection system (IndexedDB + CSV export)
 ```
 
 ---
 
-## 9. Tools & Workflow Used
+## 10. Tools & Workflow Used
 
-- **Build**: Vite 5.2 + TypeScript 5.4, multi-entry (background/content/sidepanel/settings)
+- **Build**: Vite 8 + TypeScript 5.4, multi-entry (background/content/sidepanel/settings); `"type": "module"` required in package.json (ESM-only deps)
 - **Skills used**: `superpowers:writing-plans` → `superpowers:subagent-driven-development` → spec review + code quality review per task
 - **Review pattern**: Each task gets spec compliance review (must pass before quality review), then code quality review. Issues go back to implementer before marking complete.
 - **Commit style**: one commit per task, imperative message (`fix:` / `feat:` prefix)
