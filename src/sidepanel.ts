@@ -13,9 +13,18 @@ let isStreaming = false
 let lastSnapshot: PageSnapshot | null = null
 let lastError: string | null = null
 
+// ---- Rate limit config ----
+function applyRateLimitConfig(settings: import('./types').Settings) {
+  chrome.runtime.sendMessage({
+    type: 'CONFIGURE_RATE_LIMIT',
+    payload: { max: settings.maxActionsPerMinute, delay: settings.actionDelay },
+  })
+}
+
 // ---- Init ----
 async function init() {
   const settings = await loadSettings()
+  applyRateLimitConfig(settings)
   ;(document.getElementById('modelBadge') as HTMLElement).textContent = settings.model
 
   renderQuickPrompts()
@@ -149,6 +158,7 @@ async function executeActions(actions: AgentAction[]) {
       break
     }
   }
+  lastError = null  // all actions succeeded
 }
 
 // ---- Page actions ----
@@ -242,6 +252,7 @@ async function saveSkill() {
   const trigger = (document.getElementById('skillTrigger') as HTMLInputElement).value.trim()
   const instructions = (document.getElementById('skillInstructions') as HTMLTextAreaElement).value.trim()
   if (!name || !instructions) { alert('名称和 AI 指令不能为空'); return }
+  if (!trigger) { alert('触发词不能为空，否则 Skill 永远不会被激活'); return }
 
   const settings = await loadSettings()
   await saveSettings({
@@ -406,6 +417,7 @@ chrome.runtime.onMessage.addListener((message) => {
   if (message.type === 'SETTINGS_UPDATED') {
     loadSettings().then((settings) => {
       ;(document.getElementById('modelBadge') as HTMLElement).textContent = settings.model
+      applyRateLimitConfig(settings)
       renderQuickPrompts()
       renderSkills()
     })

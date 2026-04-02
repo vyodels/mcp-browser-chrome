@@ -53,6 +53,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       })
       return true
 
+    case 'CONFIGURE_RATE_LIMIT':
+      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        if (!tabs[0]?.id) { sendResponse({ success: false }); return }
+        chrome.tabs.sendMessage(tabs[0].id, message, sendResponse)
+      })
+      return true
+
     case 'TAKE_SCREENSHOT':
       chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
         if (!tabs[0]?.windowId) {

@@ -47,6 +47,7 @@ export type MessageType =
   | 'SETTINGS_UPDATED'
   | 'DEBUG_DOM'
   | 'DEBUG_RESULT'
+  | 'CONFIGURE_RATE_LIMIT'
 
 export interface Message {
   type: MessageType
