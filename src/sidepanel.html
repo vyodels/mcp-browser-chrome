@@ -56,6 +56,40 @@
     }
     .icon-btn:hover { color: var(--text); background: var(--bg3); }
 
+    /* ---- Tab indicator bar ---- */
+    .tab-indicator {
+      display: flex; align-items: center; gap: 6px;
+      padding: 5px 10px; background: var(--bg2);
+      border-bottom: 1px solid var(--border); flex-shrink: 0;
+      min-width: 0;
+    }
+    .tab-favicon { width: 14px; height: 14px; flex-shrink: 0; border-radius: 2px; }
+    .tab-title {
+      flex: 1; font-size: 11px; color: var(--text2);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      min-width: 0;
+    }
+
+    /* ---- URL navigation bar ---- */
+    .nav-bar {
+      display: flex; gap: 4px;
+      padding: 5px 10px; background: var(--bg2);
+      border-bottom: 1px solid var(--border); flex-shrink: 0;
+    }
+    .nav-input {
+      flex: 1; background: var(--bg3); border: 1px solid var(--border);
+      color: var(--text); border-radius: 6px; padding: 4px 8px;
+      font-size: 12px; font-family: var(--font); outline: none;
+      transition: border-color .15s;
+    }
+    .nav-input:focus { border-color: var(--accent); }
+    .nav-btn {
+      padding: 4px 10px; background: var(--accent); border: none;
+      color: #fff; border-radius: 6px; cursor: pointer; font-size: 13px;
+      transition: background .15s;
+    }
+    .nav-btn:hover { background: var(--accent2); }
+
     /* ---- Tabs ---- */
     .tabs {
       display: flex; border-bottom: 1px solid var(--border);
@@ -298,6 +332,19 @@
         </svg>
       </button>
     </div>
+  </div>
+
+  <!-- Tab indicator bar -->
+  <div class="tab-indicator">
+    <img class="tab-favicon" id="tabFavicon" src="" style="display:none" alt="" />
+    <span class="tab-title" id="tabTitle">未锁定 — 使用当前标签页</span>
+    <button class="icon-btn" id="lockTabBtn" title="锁定到此标签页">🎯</button>
+    <button class="icon-btn" id="unlockTabBtn" title="解除锁定" style="display:none">✕</button>
+  </div>
+  <!-- URL navigation bar -->
+  <div class="nav-bar">
+    <input type="text" class="nav-input" id="urlInput" placeholder="输入网址，按 Enter 前往..." />
+    <button class="nav-btn" id="urlNavBtn">→</button>
   </div>
 
   <!-- Tabs -->
