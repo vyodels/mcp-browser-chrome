@@ -3,7 +3,7 @@
 // 负责：页面快照、元素操作、DOM 调试
 // ============================================================
 import type { AgentAction, ActionResult, InteractiveElement, PageSnapshot } from './types'
-import { simulateMouseMove, randomDelay } from './rateLimit'
+import { simulateMouseMove, randomDelay, configureRateLimit } from './rateLimit'
 
 // ref → Element 映射
 const refMap = new Map<string, Element>()
@@ -125,9 +125,13 @@ async function executeAction(action: AgentAction): Promise<ActionResult> {
         return { success: true, message: `导航到 ${action.url}` }
       }
 
-      case 'screenshot':
-        // 截图由 background 处理
-        return { success: true, message: '截图请求已发送' }
+      case 'screenshot': {
+        const resp = await new Promise<{ success: boolean; dataUrl?: string; error?: string }>(
+          (resolve) => chrome.runtime.sendMessage({ type: 'TAKE_SCREENSHOT' }, resolve)
+        )
+        if (!resp?.success) throw new Error(resp?.error ?? '截图失败')
+        return { success: true, message: '截图完成', screenshotDataUrl: resp.dataUrl, snapshot: takeSnapshot() }
+      }
 
       default:
         throw new Error(`未知动作: ${(action as AgentAction).action}`)
@@ -162,5 +166,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     case 'EXECUTE_ACTION':
       executeAction(message.payload as AgentAction).then(sendResponse)
       return true // async
+
+    case 'CONFIGURE_RATE_LIMIT':
+      configureRateLimit(message.payload.max, message.payload.delay)
+      sendResponse({ success: true })
+      break
   }
 })
