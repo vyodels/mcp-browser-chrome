@@ -106,7 +106,11 @@ function collectPrompts(): SavedPrompt[] {
 }
 
 function escHtml(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
 }
 
 function genId(): string { return Math.random().toString(36).slice(2) }
