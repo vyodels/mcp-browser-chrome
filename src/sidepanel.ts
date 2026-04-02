@@ -246,6 +246,56 @@ function matchSkill(text: string, skills: Skill[]): Skill | null {
   return null
 }
 
+async function quickParseWithSkill(skillId: string) {
+  if (isStreaming) return
+
+  setStatus('busy', '读取页面...')
+  const pageResp = await new Promise<{ success: boolean; snapshot?: PageSnapshot }>((resolve) => {
+    chrome.runtime.sendMessage({ type: 'GET_PAGE_CONTENT' }, resolve)
+  })
+  if (!pageResp?.success || !pageResp.snapshot) {
+    setStatus('error', '读取页面失败')
+    return
+  }
+  lastSnapshot = pageResp.snapshot
+
+  const settings = await loadSettings()
+  const skill = settings.skills.find((s) => s.id === skillId)
+  if (!skill) return
+
+  const snap = lastSnapshot
+  const contextText = `[使用 Skill: ${skill.name}]\n${skill.instructions}\n\n【当前页面快照】\nURL: ${snap.url}\n标题: ${snap.title}\n\n页面文本:\n${snap.text.slice(0, 3000)}\n\n交互元素:\n${
+    snap.interactiveElements.slice(0, 30).map((el) => `  ${el.ref} [${el.tag}] "${el.text ?? el.placeholder ?? el.ariaLabel ?? ''}"`).join('\n')
+  }`
+
+  const userMsg = appendMessage('user', `[一键解析] 使用 Skill「${skill.name}」解析当前页面`)
+  chatHistory.push(userMsg)
+  setStatus('busy', `执行 Skill: ${skill.name}`)
+  setLoading(true)
+  isStreaming = true
+
+  try {
+    const assistantBubble = appendStreamingMessage()
+    let fullReply = ''
+    await chat(chatHistory, contextText, settings, undefined, (delta) => {
+      fullReply += delta
+      updateStreamingMessage(assistantBubble, fullReply)
+    })
+    finalizeStreamingMessage(assistantBubble, fullReply)
+    chatHistory.push({ id: genId(), role: 'assistant', content: fullReply, timestamp: Date.now() })
+
+    const actions = parseActions(fullReply)
+    if (actions.length > 0) await executeActions(actions)
+    setStatus('ready', '就绪')
+  } catch (e) {
+    appendMessage('assistant', `❌ 错误：${String(e)}`)
+    setStatus('error', String(e).slice(0, 50))
+  } finally {
+    isStreaming = false
+    setLoading(false)
+  }
+}
+
 async function renderSkills() {
   const settings = await loadSettings()
   const list = document.getElementById('skillsList')!
@@ -267,6 +317,7 @@ async function renderSkills() {
       <div class="skill-desc">${skill.description}</div>
       <div class="skill-trigger">触发词: ${skill.trigger}</div>
       <div class="skill-actions">
+        <button class="skill-btn" data-id="${skill.id}" data-action="parse">解析当前页面</button>
         <button class="skill-btn" data-id="${skill.id}" data-action="toggle">${skill.status === 'active' ? '停用' : '启用'}</button>
         <button class="skill-btn danger" data-id="${skill.id}" data-action="delete">删除</button>
       </div>`
@@ -279,7 +330,10 @@ async function renderSkills() {
       const id = el.dataset.id!
       const action = el.dataset.action!
       const s = await loadSettings()
-      if (action === 'delete') {
+      if (action === 'parse') {
+        document.querySelector<HTMLElement>('.tab[data-tab="chat"]')!.click()
+        quickParseWithSkill(id)
+      } else if (action === 'delete') {
         await saveSettings({ skills: s.skills.filter((sk) => sk.id !== id) })
       } else if (action === 'toggle') {
         await saveSettings({
