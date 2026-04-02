@@ -407,5 +407,25 @@
   </div>
 
   <script type="module" src="./sidepanel.ts"></script>
+
+<!-- Save debug result as Skill modal -->
+<div id="saveDebugSkillModal" class="modal-overlay">
+  <div class="modal">
+    <h3>💾 保存为 Skill</h3>
+    <p style="color:#aaa;font-size:12px;margin:0 0 12px">自动调试成功！将此次修复方案保存为 Skill 以便下次复用。</p>
+    <label>Skill 名称</label>
+    <input id="debugSkillName" type="text" placeholder="Skill 名称" />
+    <label>触发词（多个用 | 分隔）</label>
+    <input id="debugSkillTrigger" type="text" placeholder="例：操作失败|找不到元素" />
+    <label>说明</label>
+    <input id="debugSkillDesc" type="text" placeholder="这个 Skill 做什么" />
+    <label>AI 指令（已自动生成）</label>
+    <textarea id="debugSkillInstructions" rows="5" style="font-size:11px"></textarea>
+    <div class="modal-buttons">
+      <button id="debugSkillCancel" class="secondary-btn">取消</button>
+      <button id="debugSkillSave" class="primary-btn">保存 Skill</button>
+    </div>
+  </div>
+</div>
 </body>
 </html>

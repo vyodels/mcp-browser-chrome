@@ -70,6 +70,8 @@ async function init() {
   document.getElementById('fullDomBtn')!.addEventListener('click', debugFullDom)
   document.getElementById('analyzeBtn')!.addEventListener('click', aiAnalyzeDebug)
   document.getElementById('fixBtn')!.addEventListener('click', aiFixDebug)
+  document.getElementById('debugSkillCancel')!.addEventListener('click', closeDebugSkillModal)
+  document.getElementById('debugSkillSave')!.addEventListener('click', saveDebugSkill)
 }
 
 // ---- Chat ----
@@ -410,8 +412,38 @@ ${JSON.stringify({ url: snapResp.snapshot.url, title: snapResp.snapshot.title, i
   return actions
 }
 
-// Stub — implemented in Task 6
-function offerSaveDebugAsSkill(_actions: AgentAction[], _url: string) { /* TODO */ }
+function offerSaveDebugAsSkill(workingActions: AgentAction[], pageUrl: string) {
+  const hostname = (() => { try { return new URL(pageUrl).hostname } catch { return pageUrl } })()
+  const date = new Date().toLocaleDateString('zh-CN')
+  ;(document.getElementById('debugSkillName') as HTMLInputElement).value = `${hostname} 操作修复 - ${date}`
+  ;(document.getElementById('debugSkillTrigger') as HTMLInputElement).value = `${hostname}|操作失败`
+  ;(document.getElementById('debugSkillDesc') as HTMLInputElement).value = `针对 ${hostname} 的自动修复操作序列`
+  ;(document.getElementById('debugSkillInstructions') as HTMLTextAreaElement).value =
+    `[自动生成于 ${pageUrl}]\n\n以下是调试成功的操作步骤，可直接复用：\n\n\`\`\`json\n${JSON.stringify(workingActions, null, 2)}\n\`\`\``
+  ;(document.getElementById('saveDebugSkillModal') as HTMLElement).classList.add('open')
+}
+
+function closeDebugSkillModal() {
+  ;(document.getElementById('saveDebugSkillModal') as HTMLElement).classList.remove('open')
+}
+
+async function saveDebugSkill() {
+  const name = (document.getElementById('debugSkillName') as HTMLInputElement).value.trim()
+  const trigger = (document.getElementById('debugSkillTrigger') as HTMLInputElement).value.trim()
+  const desc = (document.getElementById('debugSkillDesc') as HTMLInputElement).value.trim()
+  const instructions = (document.getElementById('debugSkillInstructions') as HTMLTextAreaElement).value.trim()
+  if (!name || !trigger || !instructions) { alert('名称、触发词和 AI 指令不能为空'); return }
+  const settings = await loadSettings()
+  await saveSettings({
+    skills: [...settings.skills, {
+      id: genId(), name, description: desc, trigger, instructions,
+      status: 'active' as const, createdAt: Date.now(),
+    }],
+  })
+  closeDebugSkillModal()
+  renderSkills()
+  appendMessage('assistant', `✅ Skill「${name}」已保存，下次遇到相同页面会自动激活。`)
+}
 
 // ---- Quick Prompts ----
 async function renderQuickPrompts() {
