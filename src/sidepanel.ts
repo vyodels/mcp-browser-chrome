@@ -12,6 +12,8 @@ let pendingScreenshot: string | null = null
 let isStreaming = false
 let lastSnapshot: PageSnapshot | null = null
 let lastError: string | null = null
+let autoDebugRound = 0
+const MAX_AUTO_DEBUG_ROUNDS = 3
 
 // ---- Rate limit config ----
 function applyRateLimitConfig(settings: import('./types').Settings) {
@@ -133,8 +135,12 @@ async function sendMessage() {
 }
 
 async function executeActions(actions: AgentAction[]) {
-  let allSucceeded = true
-  for (const action of actions) {
+  let remaining = [...actions]
+  const completedActions: AgentAction[] = []
+  const pageUrlAtStart = lastSnapshot?.url ?? ''
+
+  while (remaining.length > 0) {
+    const action = remaining[0]
     setStatus('busy', `执行: ${action.action} ${action.ref ?? action.url ?? ''}`)
     await throttleAction()
 
@@ -153,14 +159,47 @@ async function executeActions(actions: AgentAction[]) {
 
     if (result.snapshot) lastSnapshot = result.snapshot
 
-    if (!result.success) {
-      allSucceeded = false
-      lastError = result.message
-      appendMessage('assistant', `⚠️ 操作失败：${result.message}\n\n切换到「🔧 调试」标签让 AI 分析并修复。`)
-      break
+    if (result.success) {
+      completedActions.push(action)
+      remaining.shift()
+      continue
     }
+
+    // Action failed
+    lastError = result.message
+
+    if (autoDebugRound < MAX_AUTO_DEBUG_ROUNDS) {
+      autoDebugRound++
+      setStatus('busy', `自动调试第 ${autoDebugRound}/${MAX_AUTO_DEBUG_ROUNDS} 轮...`)
+      const fixedActions = await runAutoDebug(action, result.message)
+      if (fixedActions) {
+        remaining = [...fixedActions, ...remaining.slice(1)]
+        continue
+      }
+    }
+
+    if (autoDebugRound >= MAX_AUTO_DEBUG_ROUNDS) {
+      autoDebugRound = 0
+      appendMessage(
+        'assistant',
+        `⚠️ 已自动调试 ${MAX_AUTO_DEBUG_ROUNDS} 轮仍未成功。\n\n` +
+        `最后错误：${result.message}\n\n` +
+        `是否继续？请回复「继续调试」让我再次尝试，或切换到「🔧 调试」标签手动分析。`
+      )
+    } else {
+      autoDebugRound = 0
+      appendMessage('assistant', `⚠️ 操作失败：${result.message}\n\n切换到「🔧 调试」标签让 AI 分析并修复。`)
+    }
+    return
   }
-  if (allSucceeded) lastError = null
+
+  const wasAutoDebugUsed = autoDebugRound > 0
+  autoDebugRound = 0
+  lastError = null
+
+  if (wasAutoDebugUsed && completedActions.length > 0) {
+    offerSaveDebugAsSkill(completedActions, pageUrlAtStart)
+  }
 }
 
 // ---- Page actions ----
@@ -333,6 +372,42 @@ async function aiFixDebug() {
     }
   } catch (e) { setStatus('error', String(e)) }
 }
+
+async function runAutoDebug(failedAction: AgentAction, errorMsg: string): Promise<AgentAction[] | null> {
+  const snapResp = await new Promise<{ success: boolean; snapshot?: PageSnapshot }>((resolve) => {
+    chrome.runtime.sendMessage(
+      { type: 'EXECUTE_ACTION_IN_TAB', payload: { type: 'DEBUG_DOM' } },
+      resolve
+    )
+  })
+  if (!snapResp?.success || !snapResp.snapshot) return null
+
+  lastSnapshot = snapResp.snapshot
+
+  const settings = await loadSettings()
+  const prompt = `页面操作失败。
+失败动作: ${JSON.stringify(failedAction)}
+错误信息: ${errorMsg}
+
+请分析以下页面 DOM，找出正确的操作方式，用 \`\`\`json\n[动作列表]\n\`\`\` 格式返回修正后的操作：
+
+${JSON.stringify({ url: snapResp.snapshot.url, title: snapResp.snapshot.title, interactiveElements: snapResp.snapshot.interactiveElements.slice(0, 50), html: (snapResp.snapshot.html ?? '').slice(0, 3000) }, null, 2)}`
+
+  const result = await chat([], prompt, settings)
+  const actions = parseActions(result)
+  if (actions.length === 0) return null
+
+  const logEl = document.createElement('div')
+  logEl.className = 'action-log'
+  logEl.textContent = `🔍 自动调试第 ${autoDebugRound} 轮：AI 生成 ${actions.length} 个修复动作`
+  document.getElementById('chatMessages')!.appendChild(logEl)
+  scrollToBottom()
+
+  return actions
+}
+
+// Stub — implemented in Task 6
+function offerSaveDebugAsSkill(_actions: AgentAction[], _url: string) { /* TODO */ }
 
 // ---- Quick Prompts ----
 async function renderQuickPrompts() {
