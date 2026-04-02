@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite'
+import { defineConfig, type Plugin } from 'vite'
 import { resolve } from 'path'
 import { viteStaticCopy } from 'vite-plugin-static-copy'
 import { readdirSync, renameSync, rmdirSync, existsSync } from 'fs'
@@ -28,7 +28,7 @@ export default defineConfig({
         { src: 'icons', dest: '.' },
       ],
     }),
-    {
+    ({
       name: 'flatten-html',
       closeBundle() {
         const srcDir = resolve(__dirname, 'dist/src')
@@ -40,6 +40,6 @@ export default defineConfig({
         }
         rmdirSync(srcDir)
       },
-    },
+    } satisfies Plugin),
   ],
 })
