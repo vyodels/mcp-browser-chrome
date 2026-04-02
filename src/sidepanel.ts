@@ -133,6 +133,7 @@ async function sendMessage() {
 }
 
 async function executeActions(actions: AgentAction[]) {
+  let allSucceeded = true
   for (const action of actions) {
     setStatus('busy', `执行: ${action.action} ${action.ref ?? action.url ?? ''}`)
     await throttleAction()
@@ -153,12 +154,13 @@ async function executeActions(actions: AgentAction[]) {
     if (result.snapshot) lastSnapshot = result.snapshot
 
     if (!result.success) {
+      allSucceeded = false
       lastError = result.message
       appendMessage('assistant', `⚠️ 操作失败：${result.message}\n\n切换到「🔧 调试」标签让 AI 分析并修复。`)
       break
     }
   }
-  lastError = null  // all actions succeeded
+  if (allSucceeded) lastError = null
 }
 
 // ---- Page actions ----
