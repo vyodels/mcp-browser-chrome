@@ -6,7 +6,7 @@ import type { Settings } from './types'
 export const DEFAULT_SETTINGS: Settings = {
   authMode: 'apikey',
   apiKey: '',
-  model: 'gpt-4o',
+  model: 'GPT-5.2',
   systemPrompt: `你是一个浏览器操作助手。你可以帮助用户：
 1. 理解当前网页内容
 2. 执行页面操作（点击、填表、导航）

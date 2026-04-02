@@ -16,7 +16,7 @@ chrome.runtime.onInstalled.addListener(() => {
 })
 
 // ---- 消息路由 ----
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   switch (message.type) {
     case 'OPEN_SETTINGS':
       chrome.runtime.openOptionsPage()
@@ -80,6 +80,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       })
       return true
   }
+  return false
 })
 
 // ---- ChatGPT session 代理 ----

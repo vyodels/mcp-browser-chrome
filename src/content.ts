@@ -172,4 +172,5 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       sendResponse({ success: true })
       break
   }
+  return false
 })
