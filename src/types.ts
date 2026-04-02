@@ -36,6 +36,13 @@ export interface Skill {
   lastUsed?: number
 }
 
+export interface TabInfo {
+  id: number
+  url: string
+  title: string
+  favIconUrl?: string
+}
+
 // ---- 消息总线 ----
 export type MessageType =
   | 'GET_PAGE_CONTENT'
@@ -49,10 +56,13 @@ export type MessageType =
   | 'DEBUG_DOM'
   | 'DEBUG_RESULT'
   | 'CONFIGURE_RATE_LIMIT'
+  | 'GET_ACTIVE_TAB'
+  | 'EXECUTE_ACTION_IN_TAB'
 
 export interface Message {
   type: MessageType
   payload?: unknown
+  targetTabId?: number
 }
 
 // ---- 页面内容快照 ----
