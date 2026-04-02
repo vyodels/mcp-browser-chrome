@@ -176,6 +176,10 @@ async function executeActions(actions: AgentAction[]) {
         remaining = [...fixedActions, ...remaining.slice(1)]
         continue
       }
+      // AI returned no fix — stop immediately
+      autoDebugRound = 0
+      appendMessage('assistant', `⚠️ 自动调试未能生成修复方案：${result.message}\n\n切换到「🔧 调试」标签手动分析。`)
+      return
     }
 
     if (autoDebugRound >= MAX_AUTO_DEBUG_ROUNDS) {
