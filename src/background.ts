@@ -43,7 +43,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     case 'CONFIGURE_RATE_LIMIT':
       chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
         if (!tabs[0]?.id) { sendResponse({ success: false }); return }
-        chrome.tabs.sendMessage(tabs[0].id, message, sendResponse)
+        chrome.tabs.sendMessage(tabs[0].id, message, () => {
+          if (chrome.runtime.lastError) sendResponse({ success: false })
+          else sendResponse({ success: true })
+        })
       })
       return true
 

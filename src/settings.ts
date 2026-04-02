@@ -43,8 +43,8 @@ async function init() {
       prompts,
     })
 
-    // Notify sidepanel
-    chrome.runtime.sendMessage({ type: 'SETTINGS_UPDATED' })
+    // Notify sidepanel (ignore error if sidepanel is not open)
+    chrome.runtime.sendMessage({ type: 'SETTINGS_UPDATED' }, () => void chrome.runtime.lastError)
 
     const toast = document.getElementById('toast')!
     toast.classList.add('show')
