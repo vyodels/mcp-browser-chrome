@@ -173,29 +173,30 @@ async function executeActions(actions: AgentAction[]) {
     if (autoDebugRound < MAX_AUTO_DEBUG_ROUNDS) {
       autoDebugRound++
       setStatus('busy', `自动调试第 ${autoDebugRound}/${MAX_AUTO_DEBUG_ROUNDS} 轮...`)
-      const fixedActions = await runAutoDebug(action, result.message)
-      if (fixedActions) {
-        remaining = [...fixedActions, ...remaining.slice(1)]
-        continue
+      try {
+        const fixedActions = await runAutoDebug(action, result.message)
+        if (fixedActions) {
+          remaining = [...fixedActions, ...remaining.slice(1)]
+          continue
+        }
+        // AI returned no fix — stop immediately
+        autoDebugRound = 0
+        appendMessage('assistant', `⚠️ 自动调试未能生成修复方案：${result.message}\n\n切换到「🔧 调试」标签手动分析。`)
+      } catch (debugErr) {
+        autoDebugRound = 0
+        appendMessage('assistant', `⚠️ 自动调试出错：${String(debugErr)}\n\n切换到「🔧 调试」标签手动分析。`)
       }
-      // AI returned no fix — stop immediately
-      autoDebugRound = 0
-      appendMessage('assistant', `⚠️ 自动调试未能生成修复方案：${result.message}\n\n切换到「🔧 调试」标签手动分析。`)
       return
     }
 
-    if (autoDebugRound >= MAX_AUTO_DEBUG_ROUNDS) {
-      autoDebugRound = 0
-      appendMessage(
-        'assistant',
-        `⚠️ 已自动调试 ${MAX_AUTO_DEBUG_ROUNDS} 轮仍未成功。\n\n` +
-        `最后错误：${result.message}\n\n` +
-        `是否继续？请回复「继续调试」让我再次尝试，或切换到「🔧 调试」标签手动分析。`
-      )
-    } else {
-      autoDebugRound = 0
-      appendMessage('assistant', `⚠️ 操作失败：${result.message}\n\n切换到「🔧 调试」标签让 AI 分析并修复。`)
-    }
+    // Rounds exhausted
+    autoDebugRound = 0
+    appendMessage(
+      'assistant',
+      `⚠️ 已自动调试 ${MAX_AUTO_DEBUG_ROUNDS} 轮仍未成功。\n\n` +
+      `最后错误：${result.message}\n\n` +
+      `是否继续？请回复「继续调试」让我再次尝试，或切换到「🔧 调试」标签手动分析。`
+    )
     return
   }
 
