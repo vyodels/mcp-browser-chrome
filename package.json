@@ -2,6 +2,7 @@
   "name": "gpt-browser-agent",
   "version": "1.0.0",
   "description": "AI-powered browser agent - GPT sidebar with page control",
+  "type": "module",
   "scripts": {
     "dev": "vite build --watch",
     "build": "vite build",

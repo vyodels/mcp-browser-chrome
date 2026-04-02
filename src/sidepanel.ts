@@ -401,4 +401,15 @@ function formatTime(ts: number): string {
 
 function genId(): string { return Math.random().toString(36).slice(2) }
 
+// ---- Listen for settings changes from options page ----
+chrome.runtime.onMessage.addListener((message) => {
+  if (message.type === 'SETTINGS_UPDATED') {
+    loadSettings().then((settings) => {
+      ;(document.getElementById('modelBadge') as HTMLElement).textContent = settings.model
+      renderQuickPrompts()
+      renderSkills()
+    })
+  }
+})
+
 init()
