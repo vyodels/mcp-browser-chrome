@@ -2,11 +2,12 @@
 // types.ts — 全局类型定义
 // ============================================================
 
-export type AuthMode = 'apikey' | 'chatgpt'
+export type ApiFormat = 'openai' | 'anthropic'
 
 export interface Settings {
-  authMode: AuthMode
+  baseUrl: string
   apiKey: string
+  apiFormat: ApiFormat
   model: string
   systemPrompt: string
   actionDelay: [number, number] // [min, max] ms 随机延迟范围

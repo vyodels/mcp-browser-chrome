@@ -89,8 +89,18 @@ async function sendMessage() {
   pendingScreenshot = null
   ;(input as HTMLTextAreaElement).placeholder = '告诉我你想做什么...'
 
-  setStatus('busy', '正在思考...')
+  setStatus('busy', '读取页面...')
   setLoading(true)
+
+  // 每次发消息前自动拉取当前页面快照
+  try {
+    const pageResp = await new Promise<{ success: boolean; snapshot?: PageSnapshot }>((resolve) => {
+      chrome.runtime.sendMessage({ type: 'GET_PAGE_CONTENT' }, resolve)
+    })
+    if (pageResp?.success && pageResp.snapshot) lastSnapshot = pageResp.snapshot
+  } catch { /* chrome:// 等特殊页面无法注入，忽略 */ }
+
+  setStatus('busy', '正在思考...')
 
   try {
     const settings = await loadSettings()
@@ -103,9 +113,11 @@ async function sendMessage() {
     }
 
     if (lastSnapshot) {
-      contextText += `\n\n【当前页面快照】\nURL: ${lastSnapshot.url}\n标题: ${lastSnapshot.title}\n交互元素:\n${
+      contextText += `\n\n【当前页面】\nURL: ${lastSnapshot.url}\n标题: ${lastSnapshot.title}\n\n页面文本:\n${
+        lastSnapshot.text.slice(0, 2000)
+      }\n\n交互元素:\n${
         lastSnapshot.interactiveElements
-          .slice(0, 30)
+          .slice(0, 40)
           .map((el) => `  ${el.ref} [${el.tag}] "${el.text ?? el.placeholder ?? el.ariaLabel ?? ''}"`)
           .join('\n')
       }`

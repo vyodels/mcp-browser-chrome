@@ -9,8 +9,9 @@
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
-    "typescript": "^5.4.0",
     "@types/chrome": "^0.0.268",
+    "@types/node": "^25.5.0",
+    "typescript": "^5.4.0",
     "vite": "^8.0.3",
     "vite-plugin-static-copy": "^4.0.0"
   }

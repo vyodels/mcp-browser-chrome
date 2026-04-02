@@ -2,29 +2,16 @@
 // settings.ts — 设置页面逻辑
 // ============================================================
 import { loadSettings, saveSettings } from './store'
-import type { SavedPrompt } from './types'
+import type { SavedPrompt, ApiFormat } from './types'
 
 async function init() {
   const settings = await loadSettings()
 
-  // Auth tabs
-  const authTabs = document.querySelectorAll<HTMLElement>('.auth-tab')
-  authTabs.forEach((tab) => {
-    if (tab.dataset.mode === settings.authMode) tab.classList.add('active')
-    else tab.classList.remove('active')
-    tab.addEventListener('click', () => {
-      authTabs.forEach((t) => t.classList.remove('active'))
-      tab.classList.add('active')
-      document.querySelectorAll('.auth-section').forEach((s) => s.classList.remove('active'))
-      document.getElementById(`section-${tab.dataset.mode}`)!.classList.add('active')
-    })
-  })
-  document.getElementById(`section-${settings.authMode}`)!.classList.add('active')
-
   // Fields
+  ;(document.getElementById('baseUrl') as HTMLInputElement).value = settings.baseUrl
   ;(document.getElementById('apiKey') as HTMLInputElement).value = settings.apiKey
-  ;(document.getElementById('model') as HTMLSelectElement).value = settings.model
-  ;(document.getElementById('modelSession') as HTMLSelectElement).value = settings.model
+  ;(document.getElementById('apiFormat') as HTMLSelectElement).value = settings.apiFormat
+  ;(document.getElementById('model') as HTMLInputElement).value = settings.model
   ;(document.getElementById('systemPrompt') as HTMLTextAreaElement).value = settings.systemPrompt
 
   // Range sliders
@@ -40,17 +27,13 @@ async function init() {
 
   // Save
   document.getElementById('saveBtn')!.addEventListener('click', async () => {
-    const activeMode = document.querySelector<HTMLElement>('.auth-tab.active')?.dataset.mode as 'apikey' | 'chatgpt'
-    const modelVal = activeMode === 'apikey'
-      ? (document.getElementById('model') as HTMLSelectElement).value
-      : (document.getElementById('modelSession') as HTMLSelectElement).value
-
     const prompts = collectPrompts()
 
     await saveSettings({
-      authMode: activeMode,
+      baseUrl: (document.getElementById('baseUrl') as HTMLInputElement).value.trim(),
       apiKey: (document.getElementById('apiKey') as HTMLInputElement).value.trim(),
-      model: modelVal,
+      apiFormat: (document.getElementById('apiFormat') as HTMLSelectElement).value as ApiFormat,
+      model: (document.getElementById('model') as HTMLInputElement).value.trim(),
       systemPrompt: (document.getElementById('systemPrompt') as HTMLTextAreaElement).value.trim(),
       actionDelay: [
         parseInt((document.getElementById('delayMin') as HTMLInputElement).value),
