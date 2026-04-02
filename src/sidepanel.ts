@@ -1,7 +1,7 @@
 // ============================================================
 // sidepanel.ts — 侧边栏主逻辑
 // ============================================================
-import type { ChatMessage, Skill, AgentAction, ActionResult, PageSnapshot } from './types'
+import type { ChatMessage, Skill, AgentAction, ActionResult, PageSnapshot, TabInfo } from './types'
 import { loadSettings, saveSettings } from './store'
 import { chat, parseActions } from './openai'
 import { throttleAction } from './rateLimit'
@@ -14,6 +14,8 @@ let lastSnapshot: PageSnapshot | null = null
 let lastError: string | null = null
 let autoDebugRound = 0
 const MAX_AUTO_DEBUG_ROUNDS = 3
+let targetTabId: number | null = null
+let targetTabInfo: TabInfo | null = null
 
 // ---- Rate limit config ----
 function applyRateLimitConfig(settings: import('./types').Settings) {
@@ -21,6 +23,61 @@ function applyRateLimitConfig(settings: import('./types').Settings) {
     type: 'CONFIGURE_RATE_LIMIT',
     payload: { max: settings.maxActionsPerMinute, delay: settings.actionDelay },
   })
+}
+
+// ---- Tab targeting ----
+async function lockToTab(tabId: number) {
+  try {
+    const tab = await chrome.tabs.get(tabId)
+    targetTabId = tabId
+    targetTabInfo = { id: tabId, url: tab.url ?? '', title: tab.title ?? '', favIconUrl: tab.favIconUrl }
+    updateTabBar()
+  } catch { /* tab closed */ }
+}
+
+function unlockTab() {
+  targetTabId = null
+  targetTabInfo = null
+  updateTabBar()
+}
+
+function updateTabBar() {
+  const favicon = document.getElementById('tabFavicon') as HTMLImageElement
+  const title = document.getElementById('tabTitle') as HTMLElement
+  const lockBtn = document.getElementById('lockTabBtn') as HTMLButtonElement
+  const unlockBtn = document.getElementById('unlockTabBtn') as HTMLButtonElement
+
+  if (targetTabInfo) {
+    if (targetTabInfo.favIconUrl) {
+      favicon.src = targetTabInfo.favIconUrl
+      favicon.style.display = ''
+    } else {
+      favicon.style.display = 'none'
+    }
+    title.textContent = targetTabInfo.title || targetTabInfo.url
+    lockBtn.style.display = 'none'
+    unlockBtn.style.display = ''
+  } else {
+    favicon.style.display = 'none'
+    title.textContent = '未锁定 — 使用当前标签页'
+    lockBtn.style.display = ''
+    unlockBtn.style.display = 'none'
+  }
+}
+
+async function navigateUrl() {
+  const input = document.getElementById('urlInput') as HTMLInputElement
+  let url = input.value.trim()
+  if (!url) return
+  if (!url.startsWith('http://') && !url.startsWith('https://')) url = 'https://' + url
+
+  if (targetTabId) {
+    await chrome.tabs.update(targetTabId, { url })
+  } else {
+    const tab = await chrome.tabs.create({ url })
+    if (tab.id) await lockToTab(tab.id)
+  }
+  input.value = ''
 }
 
 // ---- Init ----
@@ -72,6 +129,21 @@ async function init() {
   document.getElementById('fixBtn')!.addEventListener('click', aiFixDebug)
   document.getElementById('debugSkillCancel')!.addEventListener('click', closeDebugSkillModal)
   document.getElementById('debugSkillSave')!.addEventListener('click', saveDebugSkill)
+
+  document.getElementById('lockTabBtn')!.addEventListener('click', () => {
+    chrome.runtime.sendMessage({ type: 'GET_ACTIVE_TAB' }, (resp) => {
+      if (resp?.success && resp.tab) {
+        targetTabId = resp.tab.id
+        targetTabInfo = resp.tab as TabInfo
+        updateTabBar()
+      }
+    })
+  })
+  document.getElementById('unlockTabBtn')!.addEventListener('click', unlockTab)
+  document.getElementById('urlNavBtn')!.addEventListener('click', navigateUrl)
+  ;(document.getElementById('urlInput') as HTMLInputElement).addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') navigateUrl()
+  })
 }
 
 // ---- Chat ----
@@ -94,10 +166,13 @@ async function sendMessage() {
 
   // 每次发消息前自动拉取当前页面快照
   try {
-    const pageResp = await new Promise<{ success: boolean; snapshot?: PageSnapshot }>((resolve) => {
-      chrome.runtime.sendMessage({ type: 'GET_PAGE_CONTENT' }, resolve)
+    const pageResp = await new Promise<{ success: boolean; snapshot?: PageSnapshot; tabId?: number }>((resolve) => {
+      chrome.runtime.sendMessage({ type: 'GET_PAGE_CONTENT', targetTabId: targetTabId ?? undefined }, resolve)
     })
-    if (pageResp?.success && pageResp.snapshot) lastSnapshot = pageResp.snapshot
+    if (pageResp?.success && pageResp.snapshot) {
+      lastSnapshot = pageResp.snapshot
+      if (!targetTabId && pageResp.tabId) await lockToTab(pageResp.tabId)
+    }
   } catch { /* chrome:// 等特殊页面无法注入，忽略 */ }
 
   setStatus('busy', '正在思考...')
@@ -160,7 +235,7 @@ async function executeActions(actions: AgentAction[]) {
 
     const result = await new Promise<ActionResult>((resolve) => {
       chrome.runtime.sendMessage(
-        { type: 'EXECUTE_ACTION_IN_TAB', payload: { type: 'EXECUTE_ACTION', payload: action } },
+        { type: 'EXECUTE_ACTION_IN_TAB', targetTabId: targetTabId ?? undefined, payload: { type: 'EXECUTE_ACTION', payload: action } },
         resolve
       )
     })
@@ -224,9 +299,10 @@ async function executeActions(actions: AgentAction[]) {
 // ---- Page actions ----
 function readPage() {
   setStatus('busy', '读取页面...')
-  chrome.runtime.sendMessage({ type: 'GET_PAGE_CONTENT' }, (resp) => {
+  chrome.runtime.sendMessage({ type: 'GET_PAGE_CONTENT', targetTabId: targetTabId ?? undefined }, async (resp) => {
     if (resp?.success) {
       lastSnapshot = resp.snapshot as PageSnapshot
+      if (!targetTabId && resp.tabId) await lockToTab(resp.tabId)
       const snap = lastSnapshot!
       appendMessage('assistant', `📄 已读取页面\n\n**${snap.title}**\n${snap.url}\n\n找到 ${snap.interactiveElements.length} 个交互元素`)
       setStatus('ready', '页面已读取')
@@ -238,7 +314,7 @@ function readPage() {
 
 function takeScreenshot() {
   setStatus('busy', '截图中...')
-  chrome.runtime.sendMessage({ type: 'TAKE_SCREENSHOT' }, (resp) => {
+  chrome.runtime.sendMessage({ type: 'TAKE_SCREENSHOT', targetTabId: targetTabId ?? undefined }, (resp) => {
     if (resp?.success) {
       pendingScreenshot = resp.dataUrl as string
       ;(document.getElementById('userInput') as HTMLTextAreaElement).placeholder = '📸 截图已附加，输入你的问题...'
@@ -387,7 +463,7 @@ function closeSkillModal() {
 
 // ---- Debug ----
 function debugSnapshot() {
-  chrome.runtime.sendMessage({ type: 'GET_PAGE_CONTENT' }, (resp) => {
+  chrome.runtime.sendMessage({ type: 'GET_PAGE_CONTENT', targetTabId: targetTabId ?? undefined }, (resp) => {
     if (resp?.success) {
       lastSnapshot = resp.snapshot as PageSnapshot
       const snap = lastSnapshot!
@@ -400,7 +476,7 @@ function debugSnapshot() {
 
 function debugFullDom() {
   chrome.runtime.sendMessage(
-    { type: 'EXECUTE_ACTION_IN_TAB', payload: { type: 'DEBUG_DOM' } },
+    { type: 'EXECUTE_ACTION_IN_TAB', targetTabId: targetTabId ?? undefined, payload: { type: 'DEBUG_DOM' } },
     (resp) => {
       if (resp?.success) {
         lastSnapshot = resp.snapshot as PageSnapshot
@@ -449,7 +525,7 @@ async function aiFixDebug() {
 async function runAutoDebug(failedAction: AgentAction, errorMsg: string): Promise<AgentAction[] | null> {
   const snapResp = await new Promise<{ success: boolean; snapshot?: PageSnapshot }>((resolve) => {
     chrome.runtime.sendMessage(
-      { type: 'EXECUTE_ACTION_IN_TAB', payload: { type: 'DEBUG_DOM' } },
+      { type: 'EXECUTE_ACTION_IN_TAB', targetTabId: targetTabId ?? undefined, payload: { type: 'DEBUG_DOM' } },
       resolve
     )
   })
