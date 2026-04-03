@@ -21,6 +21,78 @@ function resolveTab(targetTabId?: number): Promise<chrome.tabs.Tab | null> {
   return chrome.tabs.query({ active: true, currentWindow: true }).then((tabs) => tabs[0] ?? null)
 }
 
+function canInjectContentScript(url?: string): boolean {
+  return !!url && /^(https?|file):\/\//.test(url)
+}
+
+function sendTabMessage<T>(tabId: number, payload: object): Promise<{ ok: true; response: T } | { ok: false; error: string }> {
+  return new Promise((resolve) => {
+    chrome.tabs.sendMessage(tabId, payload, (response) => {
+      if (chrome.runtime.lastError) {
+        resolve({ ok: false, error: chrome.runtime.lastError.message ?? '发送消息失败' })
+      } else {
+        resolve({ ok: true, response: response as T })
+      }
+    })
+  })
+}
+
+async function ensureContentScript(tab: chrome.tabs.Tab): Promise<{ success: true } | { success: false; error: string }> {
+  if (!tab.id) {
+    return { success: false, error: '没有可用的标签页 ID' }
+  }
+
+  if (!canInjectContentScript(tab.url)) {
+    return {
+      success: false,
+      error: '当前页面不支持扩展注入（如 chrome://、扩展页、新标签页），请切换到普通网页后再试',
+    }
+  }
+
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      files: ['content.js'],
+    })
+    return { success: true }
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : '内容脚本注入失败',
+    }
+  }
+}
+
+async function relayToContentScript<T>(
+  tab: chrome.tabs.Tab,
+  payload: object
+): Promise<{ success: true; response: T } | { success: false; error: string }> {
+  if (!tab.id) {
+    return { success: false, error: '没有活跃标签页' }
+  }
+
+  const firstTry = await sendTabMessage<T>(tab.id, payload)
+  if (firstTry.ok) {
+    return { success: true, response: firstTry.response }
+  }
+
+  if (!firstTry.error.includes('Receiving end does not exist')) {
+    return { success: false, error: firstTry.error }
+  }
+
+  const injected = await ensureContentScript(tab)
+  if (!injected.success) {
+    return injected
+  }
+
+  const secondTry = await sendTabMessage<T>(tab.id, payload)
+  if (secondTry.ok) {
+    return { success: true, response: secondTry.response }
+  }
+
+  return { success: false, error: secondTry.error }
+}
+
 // ---- 消息路由 ----
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   switch (message.type) {
@@ -57,19 +129,28 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     case 'EXECUTE_ACTION_IN_TAB':
       resolveTab(message.targetTabId).then((tab) => {
         if (!tab?.id) { sendResponse({ success: false, error: '没有活跃标签页' }); return }
-        chrome.tabs.sendMessage(tab.id, message.payload, sendResponse)
+        relayToContentScript(tab, message.payload).then((result) => {
+          if (!result.success) {
+            sendResponse({ success: false, error: result.error })
+            return
+          }
+          sendResponse(result.response)
+        })
       })
       return true
 
     case 'GET_PAGE_CONTENT':
       resolveTab(message.targetTabId).then((tab) => {
         if (!tab?.id) { sendResponse({ success: false, error: '没有活跃标签页' }); return }
-        chrome.tabs.sendMessage(tab.id, { type: 'GET_PAGE_CONTENT' }, (resp) => {
-          if (chrome.runtime.lastError) {
-            sendResponse({ success: false, error: chrome.runtime.lastError.message })
-          } else {
-            sendResponse({ ...resp, tabId: tab.id })
+        relayToContentScript<{ success: boolean; snapshot?: unknown; error?: string }>(
+          tab,
+          { type: 'GET_PAGE_CONTENT' }
+        ).then((result) => {
+          if (!result.success) {
+            sendResponse({ success: false, error: result.error })
+            return
           }
+          sendResponse({ ...result.response, tabId: tab.id })
         })
       })
       return true
@@ -77,8 +158,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     case 'CONFIGURE_RATE_LIMIT':
       resolveTab(message.targetTabId).then((tab) => {
         if (!tab?.id) { sendResponse({ success: false }); return }
-        chrome.tabs.sendMessage(tab.id, message, () => {
-          if (chrome.runtime.lastError) sendResponse({ success: false })
+        relayToContentScript(tab, message).then((result) => {
+          if (!result.success) sendResponse({ success: false, error: result.error })
           else sendResponse({ success: true })
         })
       })
