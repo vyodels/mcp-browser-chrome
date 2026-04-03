@@ -160,11 +160,20 @@ function buildMemorySection(persistentEntries: MemoryEntry[] = _cachedPersistent
 // ============================================================
 // 消息队列压缩 + 滑动窗口
 // ============================================================
+// 历史消息中大型工具结果的压缩策略：
+//   - 内容 < COMPRESS_THRESHOLD：不压缩
+//   - 内容 >= COMPRESS_THRESHOLD：保留头部 HEAD_KEEP + 保留尾部 TAIL_KEEP，压缩中间
+// 两段式保留：头部通常是 URL/标题，尾部通常是可交互元素列表，两者对 AI 最有价值
+const COMPRESS_THRESHOLD = 2000  // 超过此长度才压缩
+const HEAD_KEEP = 800            // 头部保留（URL + 标题 + 主要文本开头）
+const TAIL_KEEP = 600            // 尾部保留（可交互元素列表）
+
 function compressForHistory(toolName: string, content: string): string {
-  if (LARGE_TOOLS.has(toolName) && content.length > 600) {
-    return `${content.slice(0, 400)}\n...[${toolName} 结果已截断，原始 ${content.length} 字符]`
-  }
-  return content
+  if (!LARGE_TOOLS.has(toolName) || content.length <= COMPRESS_THRESHOLD) return content
+  const head = content.slice(0, HEAD_KEEP)
+  const tail = content.slice(-TAIL_KEEP)
+  const dropped = content.length - HEAD_KEEP - TAIL_KEEP
+  return `${head}\n...[中间内容已省略 ${dropped} 字符，原始共 ${content.length} 字符]...\n${tail}`
 }
 
 function trimLoopMessages() {
