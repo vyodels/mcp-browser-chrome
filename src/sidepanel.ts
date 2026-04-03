@@ -2,12 +2,12 @@
 // sidepanel.ts — 侧边栏主逻辑 v2
 // Agent Loop 控制 + Tool Calling + 工作流执行 + Apple 风格 UI
 // ============================================================
-import { loadSettings } from './store'
+import { loadSettings, saveSettings } from './store'
 import { chatWithTools } from './openai'
 import { TOOL_DEFINITIONS, executeTool, formatToolResult } from './tools'
 import { createTaskTabGroup, getAllTabs } from './tabManager'
 import { buildStepSystemPrompt } from './workflow'
-import type { Settings, LoopState, InterventionRequest, Workflow } from './types'
+import type { Settings, LoopState, InterventionRequest, Workflow, ActivityEntry, ActivityType } from './types'
 import type { ToolCallRequest } from './tools'
 
 // ============================================================
@@ -23,6 +23,7 @@ let taskName = '新任务'
 let currentWorkflow: Workflow | null = null
 let currentStepIndex = 0
 let pendingIntervention: ((answer: string) => void) | null = null
+let currentLogFilter: ActivityType | 'all' = 'all'
 
 // ============================================================
 // 消息封装
@@ -46,10 +47,29 @@ function escHtml(s: string): string {
 }
 
 function formatContent(text: string): string {
-  return escHtml(text)
+  const escaped = escHtml(text)
+  // 段落（双换行）
+  const paragraphed = escaped.split(/\n\n+/).map((para) => {
+    // 处理段落内的列表行
+    const lines = para.split('\n')
+    const isListBlock = lines.every((l) => /^[-*] /.test(l.trim()) || l.trim() === '')
+    if (isListBlock && lines.some((l) => /^[-*] /.test(l.trim()))) {
+      const items = lines.filter((l) => /^[-*] /.test(l.trim()))
+        .map((l) => `<li>${l.replace(/^[-*] /, '')}</li>`).join('')
+      return `<ul>${items}</ul>`
+    }
+    // 标题行（### / ## / #）
+    const titleMatch = para.match(/^#{1,3} (.+)/)
+    if (titleMatch) return `<strong>${titleMatch[1]}</strong>`
+    // 普通段落：单换行转 <br>
+    const inner = lines.join('<br>')
+      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      .replace(/`(.+?)`/g, '<code>$1</code>')
+    return `<p>${inner}</p>`
+  }).join('')
+  return paragraphed
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
     .replace(/`(.+?)`/g, '<code>$1</code>')
-    .replace(/\n/g, '<br>')
 }
 
 function scrollToBottom() {
@@ -86,9 +106,11 @@ function appendMessage(role: string, content: string, opts: {
 function appendStreamingMessage(role: string): { append: (chunk: string) => void; getText: () => string } {
   let full = ''
   const div = appendMessage(role, '')
-  const bubble = div.querySelector('.bubble')!
+  const bubble = div.querySelector('.bubble') as HTMLElement
+  bubble.style.display = 'none'  // 初始隐藏，避免空白框
   return {
     append(chunk: string) {
+      if (bubble.style.display === 'none') bubble.style.display = ''
       full += chunk
       bubble.innerHTML = formatContent(full)
       scrollToBottom()
@@ -157,6 +179,49 @@ function resolveIntervention(answer: string) {
 }
 
 // ============================================================
+// 活动记录
+// ============================================================
+async function addActivityEntry(entry: Omit<ActivityEntry, 'id' | 'timestamp'>) {
+  const newEntry: ActivityEntry = {
+    ...entry,
+    id: `act-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    timestamp: Date.now(),
+  }
+  const current = await loadSettings()
+  const log = [newEntry, ...(current.activityLog ?? [])].slice(0, 200)
+  await saveSettings({ activityLog: log })
+}
+
+const ACTIVITY_ICONS: Record<ActivityType, string> = {
+  download: '📥', navigate: '🌐', candidate: '👤', note: '📝',
+}
+
+function renderActivityLog(filter: ActivityType | 'all' = 'all') {
+  loadSettings().then((s) => {
+    const logEl = el('activityLog')
+    const entries = filter === 'all'
+      ? (s.activityLog ?? [])
+      : (s.activityLog ?? []).filter((e) => e.type === filter)
+    if (entries.length === 0) {
+      logEl.innerHTML = '<div class="log-empty">暂无活动记录</div>'
+      return
+    }
+    logEl.innerHTML = entries.map((e) => {
+      const time = new Date(e.timestamp).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+      return `<div class="log-entry">
+        <span class="log-icon">${ACTIVITY_ICONS[e.type] ?? '📌'}</span>
+        <div class="log-content">
+          <div class="log-title">${escHtml(e.title)}</div>
+          ${e.detail ? `<div class="log-detail">${escHtml(e.detail)}</div>` : ''}
+          ${e.taskName ? `<div class="log-detail" style="color:var(--accent)">${escHtml(e.taskName)}</div>` : ''}
+          <div class="log-time">${time}</div>
+        </div>
+      </div>`
+    }).join('')
+  })
+}
+
+// ============================================================
 // Agent Loop 核心
 // ============================================================
 async function runAgentLoop(initialUserMessage?: string) {
@@ -168,6 +233,7 @@ async function runAgentLoop(initialUserMessage?: string) {
     taskName,
     tabGroupId: taskTabGroupId,
     sendMsg,
+    logActivity: addActivityEntry,
   }
 
   if (initialUserMessage) {
@@ -283,12 +349,25 @@ function formatToolArgs(args: Record<string, unknown>): string {
 // ============================================================
 // 工作流
 // ============================================================
+const INTERVENTION_LABELS: Record<string, string> = {
+  none: '自动', optional: '⚡ 可选介入', required: '⚠️ 必须介入',
+}
+
 function renderWorkflowList() {
   const list = el('workflowList')
   list.innerHTML = ''
   settings.workflows.forEach((wf) => {
     const card = document.createElement('div')
     card.className = 'workflow-card'
+    const stepsHtml = wf.steps.map((step, i) => `
+      <div class="wf-step-item">
+        <span class="wf-step-num">${i + 1}</span>
+        <div>
+          <div class="wf-step-name">${escHtml(step.name)}</div>
+          <div class="wf-step-intervention">${INTERVENTION_LABELS[step.intervention] ?? step.intervention}</div>
+        </div>
+      </div>
+    `).join('')
     card.innerHTML = `
       <div class="wf-header">
         <span class="wf-name">${escHtml(wf.name)}</span>
@@ -296,9 +375,21 @@ function renderWorkflowList() {
       </div>
       <p class="wf-desc">${escHtml(wf.description)}</p>
       ${wf.startUrl ? `<p class="wf-url">🔗 ${escHtml(wf.startUrl)}</p>` : ''}
-      <button class="btn-primary btn-run-wf" data-id="${wf.id}">▶ 开始执行</button>
+      <div class="wf-footer">
+        <button class="wf-toggle-btn">▸ 查看步骤</button>
+        <button class="btn-primary btn-run-wf" data-id="${wf.id}">▶ 开始执行</button>
+      </div>
+      <div class="wf-steps-list">${stepsHtml}</div>
     `
     list.appendChild(card)
+
+    const toggleBtn = card.querySelector<HTMLButtonElement>('.wf-toggle-btn')!
+    const stepsList = card.querySelector<HTMLElement>('.wf-steps-list')!
+    toggleBtn.addEventListener('click', () => {
+      const open = stepsList.style.display === 'flex'
+      stepsList.style.display = open ? 'none' : 'flex'
+      toggleBtn.textContent = open ? '▸ 查看步骤' : '▾ 收起步骤'
+    })
   })
 
   list.querySelectorAll<HTMLButtonElement>('.btn-run-wf').forEach((btn) => {
@@ -382,13 +473,14 @@ function updateWorkflowProgress() {
 // ============================================================
 // 标签切换
 // ============================================================
-function switchTab(tab: 'chat' | 'workflow' | 'settings-tab') {
+function switchTab(tab: string) {
   document.querySelectorAll<HTMLElement>('.tab-btn').forEach((btn) => {
     btn.classList.toggle('active', btn.dataset.tab === tab)
   })
   document.querySelectorAll<HTMLElement>('.tab-panel').forEach((panel) => {
     panel.style.display = panel.dataset.tab === tab ? 'flex' : 'none'
   })
+  if (tab === 'log') renderActivityLog(currentLogFilter)
 }
 
 // ============================================================
@@ -416,10 +508,25 @@ async function init() {
   // 标签切换
   document.querySelectorAll<HTMLElement>('.tab-btn').forEach((btn) => {
     btn.addEventListener('click', () => {
-      const tab = btn.dataset.tab as 'chat' | 'workflow' | 'settings-tab'
+      const tab = btn.dataset.tab ?? 'chat'
       switchTab(tab)
       if (tab === 'workflow') renderWorkflowList()
     })
+  })
+
+  // 活动记录过滤
+  document.querySelectorAll<HTMLButtonElement>('.filter-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll<HTMLButtonElement>('.filter-btn').forEach((b) => b.classList.remove('active'))
+      btn.classList.add('active')
+      currentLogFilter = (btn.dataset.filter ?? 'all') as ActivityType | 'all'
+      renderActivityLog(currentLogFilter)
+    })
+  })
+
+  el('clearLogBtn')?.addEventListener('click', async () => {
+    await saveSettings({ activityLog: [] })
+    renderActivityLog(currentLogFilter)
   })
 
   // 初始加载 tab 选择器

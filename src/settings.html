@@ -190,6 +190,62 @@
     }
     .add-btn:hover { background: rgba(0,122,255,0.05); }
 
+    /* 工作流管理 */
+    .workflow-row {
+      border-bottom: 1px solid var(--border-light);
+      padding: 12px 16px;
+    }
+    .workflow-row:last-child { border-bottom: none; }
+
+    .wf-row-header {
+      display: flex; align-items: center; gap: 8px; margin-bottom: 8px;
+    }
+    .wf-title-input {
+      flex: 1; font-weight: 600; font-size: 13px;
+    }
+    .wf-expand-btn {
+      background: none; border: 1px solid var(--border);
+      border-radius: var(--radius-sm); padding: 4px 10px;
+      font-size: 11px; color: var(--accent); cursor: pointer;
+      white-space: nowrap; transition: all 0.15s;
+    }
+    .wf-expand-btn:hover { background: rgba(0,122,255,0.07); }
+
+    .wf-meta-fields { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+
+    .wf-steps-editor {
+      display: none; margin-top: 10px;
+      border: 1px solid var(--border-light); border-radius: var(--radius-sm); overflow: hidden;
+    }
+    .step-row {
+      display: flex; flex-direction: column; gap: 6px;
+      padding: 10px 12px; border-bottom: 1px solid var(--border-light);
+    }
+    .step-row:last-child { border-bottom: none; }
+    .step-row-header { display: flex; align-items: center; gap: 6px; }
+    .step-row-num {
+      font-size: 10px; font-weight: 700; color: white; background: var(--accent);
+      border-radius: 50%; width: 18px; height: 18px; flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .step-name { flex: 1; font-size: 12px; font-weight: 500; }
+    .step-intervention { font-size: 12px; }
+    .step-instructions { min-height: 60px; font-size: 12px; }
+    .step-hint { font-size: 12px; }
+    .remove-step-btn {
+      background: none; border: none; color: #ff3b30;
+      font-size: 14px; cursor: pointer; padding: 0 4px; flex-shrink: 0;
+    }
+    .add-step-btn {
+      width: 100%; padding: 8px;
+      background: rgba(0,122,255,0.04);
+      border: none; border-top: 1px solid var(--border-light);
+      color: var(--accent); font-size: 12px;
+      cursor: pointer; text-align: center;
+      transition: background 0.15s;
+    }
+    .add-step-btn:hover { background: rgba(0,122,255,0.08); }
+
     /* 底部操作 */
     .footer {
       display: flex;
@@ -308,6 +364,15 @@
   <div class="card">
     <div class="prompts-list" id="promptsList"></div>
     <button class="add-btn" id="addPromptBtn">＋ 添加快捷指令</button>
+  </div>
+</div>
+
+<!-- 工作流管理 -->
+<div class="section">
+  <div class="section-title">工作流管理</div>
+  <div class="card">
+    <div id="workflowsList"></div>
+    <button class="add-btn" id="addWorkflowBtn">＋ 添加工作流</button>
   </div>
 </div>
 
