@@ -1,478 +1,474 @@
 <!DOCTYPE html>
 <html lang="zh">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>GPT Browser Agent</title>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Browser Agent</title>
   <style>
     :root {
-      --bg: #0f0f0f;
-      --bg2: #1a1a1a;
-      --bg3: #242424;
-      --border: #2e2e2e;
-      --text: #e8e8e8;
-      --text2: #999;
-      --accent: #10a37f;
-      --accent2: #0d8a6b;
-      --danger: #e54b4b;
-      --radius: 8px;
-      --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      --bg: #f5f5f7;
+      --bg-card: rgba(255,255,255,0.85);
+      --bg-input: #ffffff;
+      --border: rgba(0,0,0,0.1);
+      --border-light: rgba(0,0,0,0.06);
+      --text: #1d1d1f;
+      --text2: #6e6e73;
+      --text3: #aeaeb2;
+      --accent: #007aff;
+      --accent-hover: #0071e3;
+      --accent-green: #30d158;
+      --accent-red: #ff3b30;
+      --accent-orange: #ff9f0a;
+      --radius: 12px;
+      --radius-sm: 8px;
+      --shadow: 0 2px 16px rgba(0,0,0,0.08);
+      --shadow-sm: 0 1px 4px rgba(0,0,0,0.06);
+      --font: -apple-system, "SF Pro Text", "Helvetica Neue", sans-serif;
     }
-    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; -webkit-font-smoothing: antialiased; }
+
     body {
       font-family: var(--font);
       background: var(--bg);
       color: var(--text);
+      font-size: 13px;
+      line-height: 1.5;
       height: 100vh;
       display: flex;
       flex-direction: column;
-      font-size: 13px;
       overflow: hidden;
     }
 
-    /* ---- Header ---- */
-    .header {
+    /* ---- 顶栏 ---- */
+    .topbar {
+      height: 52px;
+      background: rgba(245,245,247,0.92);
+      backdrop-filter: blur(20px) saturate(180%);
+      border-bottom: 1px solid var(--border-light);
       display: flex;
       align-items: center;
-      justify-content: space-between;
-      padding: 10px 12px;
-      border-bottom: 1px solid var(--border);
-      background: var(--bg2);
+      padding: 0 12px;
+      gap: 8px;
       flex-shrink: 0;
     }
-    .header-left { display: flex; align-items: center; gap: 8px; }
-    .logo { width: 20px; height: 20px; fill: var(--accent); }
-    .title { font-weight: 600; font-size: 14px; }
-    .badge {
-      font-size: 10px; padding: 2px 6px;
-      background: var(--bg3); border-radius: 10px; color: var(--text2);
+
+    .app-icon {
+      width: 26px;
+      height: 26px;
+      background: linear-gradient(135deg, #007aff, #5856d6);
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-size: 13px;
+      flex-shrink: 0;
     }
-    .header-actions { display: flex; gap: 6px; }
+
+    .app-title {
+      font-size: 14px;
+      font-weight: 600;
+      flex: 1;
+    }
+
+    .loop-status {
+      font-size: 11px;
+      font-weight: 500;
+      padding: 3px 8px;
+      border-radius: 20px;
+      background: var(--border-light);
+      color: var(--text2);
+    }
+    .loop-status--running { background: rgba(48,209,88,0.15); color: var(--accent-green); }
+    .loop-status--waiting_user { background: rgba(255,159,10,0.15); color: var(--accent-orange); }
+    .loop-status--error { background: rgba(255,59,48,0.15); color: var(--accent-red); }
+    .loop-status--paused { background: rgba(0,122,255,0.12); color: var(--accent); }
+    .loop-status--completed { background: rgba(48,209,88,0.12); color: var(--accent-green); }
+
     .icon-btn {
-      background: none; border: none; color: var(--text2);
-      cursor: pointer; padding: 4px; border-radius: 4px;
-      display: flex; align-items: center;
-      transition: color 0.15s, background 0.15s;
+      width: 30px; height: 30px;
+      border: none; background: none;
+      border-radius: 6px; cursor: pointer;
+      color: var(--text2); font-size: 16px;
+      display: flex; align-items: center; justify-content: center;
+      transition: background 0.15s;
     }
-    .icon-btn:hover { color: var(--text); background: var(--bg3); }
+    .icon-btn:hover { background: var(--border-light); }
 
-    /* ---- Tab indicator bar ---- */
-    .tab-indicator {
-      display: flex; align-items: center; gap: 6px;
-      padding: 5px 10px; background: var(--bg2);
-      border-bottom: 1px solid var(--border); flex-shrink: 0;
-      min-width: 0;
-    }
-    .tab-favicon { width: 14px; height: 14px; flex-shrink: 0; border-radius: 2px; }
-    .tab-title {
-      flex: 1; font-size: 11px; color: var(--text2);
-      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-      min-width: 0;
-    }
-
-    /* ---- URL navigation bar ---- */
-    .nav-bar {
-      display: flex; gap: 4px;
-      padding: 5px 10px; background: var(--bg2);
-      border-bottom: 1px solid var(--border); flex-shrink: 0;
-    }
-    .nav-input {
-      flex: 1; background: var(--bg3); border: 1px solid var(--border);
-      color: var(--text); border-radius: 6px; padding: 4px 8px;
-      font-size: 12px; font-family: var(--font); outline: none;
-      transition: border-color .15s;
-    }
-    .nav-input:focus { border-color: var(--accent); }
-    .nav-btn {
-      padding: 4px 10px; background: var(--accent); border: none;
-      color: #fff; border-radius: 6px; cursor: pointer; font-size: 13px;
-      transition: background .15s;
-    }
-    .nav-btn:hover { background: var(--accent2); }
-
-    /* ---- Tabs ---- */
+    /* ---- 标签栏 ---- */
     .tabs {
-      display: flex; border-bottom: 1px solid var(--border);
-      background: var(--bg2); flex-shrink: 0;
+      height: 42px;
+      background: rgba(245,245,247,0.95);
+      border-bottom: 1px solid var(--border-light);
+      display: flex;
+      align-items: center;
+      padding: 0 12px;
+      gap: 2px;
+      flex-shrink: 0;
     }
-    .tab {
-      flex: 1; padding: 8px 4px; text-align: center;
-      cursor: pointer; font-size: 11px; color: var(--text2);
-      border-bottom: 2px solid transparent;
+
+    .tab-btn {
+      height: 30px; padding: 0 14px;
+      border: none; background: none;
+      border-radius: 8px;
+      font-size: 12px; font-weight: 500;
+      color: var(--text2); cursor: pointer;
       transition: all 0.15s;
     }
-    .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
-    .tab:hover:not(.active) { color: var(--text); background: var(--bg3); }
+    .tab-btn:hover { background: var(--border-light); color: var(--text); }
+    .tab-btn.active { background: var(--accent); color: white; }
 
-    /* ---- Panels ---- */
-    .panel { display: none; flex: 1; flex-direction: column; overflow: hidden; }
-    .panel.active { display: flex; }
+    /* ---- Tab 面板 ---- */
+    .tab-panel {
+      flex: 1;
+      display: none;
+      flex-direction: column;
+      overflow: hidden;
+      min-height: 0;
+    }
 
-    /* ---- Chat panel ---- */
-    .chat-messages {
+    /* ---- 工具栏 ---- */
+    .toolbar {
+      padding: 7px 12px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      background: var(--bg);
+      border-bottom: 1px solid var(--border-light);
+      flex-shrink: 0;
+    }
+
+    .toolbar-label { font-size: 11px; color: var(--text2); white-space: nowrap; }
+
+    .tab-select {
+      flex: 1; height: 28px; padding: 0 8px;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      font-size: 12px; color: var(--text);
+      font-family: var(--font); outline: none;
+    }
+    .tab-select:focus { border-color: var(--accent); }
+
+    .toolbar-btn {
+      height: 28px; padding: 0 10px;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      font-size: 11px; color: var(--text2);
+      cursor: pointer; white-space: nowrap;
+      transition: all 0.15s;
+    }
+    .toolbar-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+    /* ---- 进度条 ---- */
+    #workflowProgress {
+      display: none; padding: 7px 12px;
+      background: rgba(0,122,255,0.05);
+      border-bottom: 1px solid var(--border-light);
+      flex-shrink: 0;
+    }
+    .progress-info { font-size: 11px; color: var(--accent); margin-bottom: 4px; font-weight: 500; }
+    .progress-track { height: 3px; background: rgba(0,122,255,0.15); border-radius: 2px; overflow: hidden; }
+    .progress-fill { height: 100%; background: var(--accent); border-radius: 2px; transition: width 0.4s ease; }
+
+    /* ---- 消息列表 ---- */
+    #messages {
+      flex: 1; overflow-y: auto;
+      padding: 12px;
+      display: flex; flex-direction: column; gap: 8px;
+      min-height: 0;
+    }
+    #messages::-webkit-scrollbar { width: 4px; }
+    #messages::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    .message { display: flex; }
+    .message--user { justify-content: flex-end; }
+    .message--assistant, .message--system { justify-content: flex-start; }
+
+    .bubble {
+      max-width: 86%; padding: 9px 12px;
+      border-radius: var(--radius);
+      font-size: 13px; line-height: 1.55;
+      word-break: break-word;
+    }
+
+    .message--user .bubble {
+      background: var(--accent); color: white;
+      border-bottom-right-radius: 4px;
+    }
+    .message--assistant .bubble {
+      background: var(--bg-card); color: var(--text);
+      border: 1px solid var(--border-light);
+      border-bottom-left-radius: 4px;
+      box-shadow: var(--shadow-sm);
+    }
+
+    .bubble code {
+      background: rgba(0,0,0,0.06); border-radius: 4px;
+      padding: 1px 5px;
+      font-family: "SF Mono", "Fira Code", monospace; font-size: 12px;
+    }
+    .message--user .bubble code { background: rgba(255,255,255,0.2); }
+
+    .screenshot-preview { max-width: 100%; border-radius: 8px; margin-bottom: 6px; display: block; }
+
+    .tool-log {
+      display: flex; align-items: flex-start; gap: 6px;
+      padding: 5px 10px;
+      background: rgba(0,0,0,0.03);
+      border-radius: 8px; font-size: 11px;
+      color: var(--text2);
+      border-left: 2px solid var(--accent-green);
+    }
+    .tool-log--error { border-left-color: var(--accent-red); color: var(--accent-red); }
+
+    /* ---- 介入面板 ---- */
+    #interventionPanel {
+      display: none; margin: 8px 12px; padding: 14px;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      flex-shrink: 0;
+    }
+
+    .intervention-question {
+      font-size: 13px; font-weight: 500; color: var(--text);
+      margin-bottom: 10px; line-height: 1.5;
+    }
+
+    #interventionOptions { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+
+    .intervention-option {
+      padding: 6px 14px;
+      background: rgba(0,122,255,0.08);
+      border: 1px solid rgba(0,122,255,0.2);
+      border-radius: 20px; font-size: 12px;
+      color: var(--accent); cursor: pointer;
+      transition: all 0.15s;
+    }
+    .intervention-option:hover { background: var(--accent); color: white; }
+
+    #interventionInputWrap { display: flex; gap: 6px; }
+
+    .intervention-input {
+      flex: 1; height: 34px; padding: 0 10px;
+      background: var(--bg-input);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      font-size: 13px; font-family: var(--font); color: var(--text); outline: none;
+    }
+    .intervention-input:focus { border-color: var(--accent); }
+
+    /* ---- 控制栏 ---- */
+    #controlBar {
+      display: none; align-items: center; justify-content: center;
+      gap: 6px; padding: 8px 12px;
+      background: rgba(245,245,247,0.95);
+      border-top: 1px solid var(--border-light);
+      flex-shrink: 0;
+    }
+
+    .ctrl-btn {
+      height: 32px; padding: 0 16px;
+      border-radius: 20px; border: 1px solid var(--border);
+      background: var(--bg-card);
+      font-size: 12px; font-weight: 500;
+      color: var(--text2); cursor: pointer;
+      transition: all 0.15s;
+    }
+    .ctrl-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+    .ctrl-btn:disabled { opacity: 0.4; cursor: default; }
+    .ctrl-btn--primary { background: var(--accent); color: white; border-color: var(--accent); }
+    .ctrl-btn--primary:hover:not(:disabled) { background: var(--accent-hover); color: white; }
+    .ctrl-btn--danger { border-color: var(--accent-red); color: var(--accent-red); }
+    .ctrl-btn--danger:hover:not(:disabled) { background: var(--accent-red); color: white; }
+
+    /* ---- 输入区 ---- */
+    .input-area {
+      padding: 10px 12px;
+      background: rgba(245,245,247,0.95);
+      border-top: 1px solid var(--border-light);
+      display: flex; align-items: flex-end; gap: 8px;
+      flex-shrink: 0;
+    }
+
+    #userInput {
+      flex: 1; min-height: 36px; max-height: 120px;
+      padding: 8px 12px;
+      background: var(--bg-input);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      font-size: 13px; font-family: var(--font); color: var(--text);
+      resize: none; outline: none; line-height: 1.4;
+      overflow-y: auto; transition: border-color 0.15s;
+    }
+    #userInput:focus { border-color: var(--accent); }
+    #userInput::placeholder { color: var(--text3); }
+
+    #sendBtn {
+      width: 34px; height: 34px; border-radius: 50%;
+      border: none; background: var(--accent); color: white;
+      font-size: 16px; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0; transition: background 0.15s, transform 0.1s;
+    }
+    #sendBtn:hover { background: var(--accent-hover); }
+    #sendBtn:active { transform: scale(0.93); }
+
+    /* ---- 工作流面板 ---- */
+    .workflow-panel {
       flex: 1; overflow-y: auto; padding: 12px;
       display: flex; flex-direction: column; gap: 10px;
     }
-    .chat-messages::-webkit-scrollbar { width: 4px; }
-    .chat-messages::-webkit-scrollbar-track { background: transparent; }
-    .chat-messages::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+    .workflow-panel::-webkit-scrollbar { width: 4px; }
+    .workflow-panel::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
 
-    .message { display: flex; flex-direction: column; gap: 4px; max-width: 100%; }
-    .message.user { align-items: flex-end; }
-    .message.assistant { align-items: flex-start; }
-    .message-bubble {
-      padding: 8px 12px; border-radius: var(--radius);
-      line-height: 1.5; word-break: break-word; max-width: 92%;
+    .panel-heading {
+      font-size: 11px; font-weight: 600; color: var(--text2);
+      text-transform: uppercase; letter-spacing: 0.4px; padding: 4px 0;
     }
-    .user .message-bubble { background: var(--accent); color: #fff; }
-    .assistant .message-bubble { background: var(--bg3); color: var(--text); }
-    .message-bubble.streaming::after {
-      content: '▌'; animation: blink 0.7s infinite;
-    }
-    @keyframes blink { 50% { opacity: 0; } }
-    .message-bubble img { max-width: 100%; border-radius: 4px; margin-top: 6px; }
-    .message-time { font-size: 10px; color: var(--text2); }
 
-    .action-log {
-      font-size: 11px; color: var(--text2);
-      background: var(--bg2); border: 1px solid var(--border);
-      border-radius: 4px; padding: 6px 10px;
-      font-family: monospace; white-space: pre-wrap;
-    }
-    .action-log.success { border-color: var(--accent); color: var(--accent); }
-    .action-log.error { border-color: var(--danger); color: var(--danger); }
-
-    /* ---- Input area ---- */
-    .chat-input-area {
-      border-top: 1px solid var(--border);
-      padding: 10px 12px; background: var(--bg2); flex-shrink: 0;
-    }
-    .quick-prompts {
-      display: flex; gap: 6px; margin-bottom: 8px;
-      overflow-x: auto; padding-bottom: 4px;
-    }
-    .quick-prompts::-webkit-scrollbar { height: 3px; }
-    .quick-prompts::-webkit-scrollbar-thumb { background: var(--border); }
-    .prompt-chip {
-      flex-shrink: 0; padding: 3px 10px; border-radius: 12px;
-      background: var(--bg3); border: 1px solid var(--border);
-      color: var(--text2); cursor: pointer; font-size: 11px;
-      transition: all 0.15s; white-space: nowrap;
-    }
-    .prompt-chip:hover { border-color: var(--accent); color: var(--accent); }
-
-    .input-row { display: flex; gap: 6px; align-items: flex-end; }
-    textarea#userInput {
-      flex: 1; background: var(--bg3); border: 1px solid var(--border);
-      color: var(--text); border-radius: var(--radius);
-      padding: 8px 10px; font-family: var(--font); font-size: 13px;
-      resize: none; min-height: 36px; max-height: 120px;
-      line-height: 1.5; outline: none; transition: border-color 0.15s;
-    }
-    textarea#userInput:focus { border-color: var(--accent); }
-    textarea#userInput::placeholder { color: var(--text2); }
-
-    .input-actions { display: flex; flex-direction: column; gap: 4px; }
-    .send-btn, .screenshot-btn, .page-btn {
-      width: 32px; height: 32px; border-radius: 6px;
-      border: none; cursor: pointer; display: flex;
-      align-items: center; justify-content: center;
-      transition: all 0.15s;
-    }
-    .send-btn { background: var(--accent); color: #fff; }
-    .send-btn:hover { background: var(--accent2); }
-    .send-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-    .screenshot-btn, .page-btn {
-      background: var(--bg3); color: var(--text2);
-      border: 1px solid var(--border);
-    }
-    .screenshot-btn:hover, .page-btn:hover { color: var(--text); border-color: var(--accent); }
-
-    /* ---- Skills panel ---- */
-    .skills-panel { padding: 12px; overflow-y: auto; gap: 10px; flex-direction: column; }
-    .panel-title {
-      font-size: 12px; font-weight: 600; color: var(--text2);
-      text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px;
-    }
-    .skill-card {
-      background: var(--bg3); border: 1px solid var(--border);
-      border-radius: var(--radius); padding: 10px 12px;
+    .workflow-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-light);
+      border-radius: var(--radius);
+      padding: 14px; box-shadow: var(--shadow-sm);
       display: flex; flex-direction: column; gap: 6px;
-      transition: border-color 0.15s;
-    }
-    .skill-card:hover { border-color: var(--accent); }
-    .skill-card.disabled { opacity: 0.5; }
-    .skill-card.error { border-color: var(--danger); }
-    .skill-header { display: flex; justify-content: space-between; align-items: center; }
-    .skill-name { font-weight: 600; font-size: 13px; }
-    .skill-badge {
-      font-size: 10px; padding: 2px 6px; border-radius: 8px;
-    }
-    .skill-badge.active { background: #0d8a6b22; color: var(--accent); }
-    .skill-badge.disabled { background: #ffffff11; color: var(--text2); }
-    .skill-badge.error { background: #e54b4b22; color: var(--danger); }
-    .skill-desc { font-size: 12px; color: var(--text2); line-height: 1.4; }
-    .skill-trigger { font-size: 11px; color: var(--text2); font-family: monospace; }
-    .skill-actions { display: flex; gap: 6px; margin-top: 4px; }
-    .skill-btn {
-      padding: 3px 10px; border-radius: 4px; font-size: 11px;
-      border: 1px solid var(--border); background: none;
-      color: var(--text2); cursor: pointer; transition: all 0.15s;
-    }
-    .skill-btn:hover { border-color: var(--accent); color: var(--accent); }
-    .skill-btn.danger:hover { border-color: var(--danger); color: var(--danger); }
-    .add-skill-btn {
-      display: flex; align-items: center; justify-content: center; gap: 6px;
-      padding: 10px; border-radius: var(--radius);
-      border: 1px dashed var(--border); background: none;
-      color: var(--text2); cursor: pointer; font-size: 13px;
-      transition: all 0.15s; width: 100%;
-    }
-    .add-skill-btn:hover { border-color: var(--accent); color: var(--accent); }
-
-    /* ---- Debug panel ---- */
-    .debug-panel { padding: 12px; overflow-y: auto; gap: 10px; flex-direction: column; }
-    .debug-info {
-      background: var(--bg3); border: 1px solid var(--border);
-      border-radius: var(--radius); padding: 10px;
-      font-family: monospace; font-size: 11px; color: var(--text2);
-      overflow-x: auto; white-space: pre-wrap; max-height: 200px;
-      overflow-y: auto;
-    }
-    .debug-actions { display: flex; gap: 8px; flex-wrap: wrap; }
-    .debug-btn {
-      padding: 6px 12px; border-radius: 6px; font-size: 12px;
-      border: 1px solid var(--border); background: var(--bg3);
-      color: var(--text); cursor: pointer; transition: all 0.15s;
-    }
-    .debug-btn:hover { border-color: var(--accent); color: var(--accent); }
-    .debug-result {
-      background: var(--bg2); border: 1px solid var(--border);
-      border-radius: var(--radius); padding: 10px;
-      font-size: 12px; line-height: 1.5; white-space: pre-wrap;
     }
 
-    /* ---- Status bar ---- */
-    .status-bar {
-      padding: 4px 12px; background: var(--bg2);
-      border-top: 1px solid var(--border);
-      display: flex; align-items: center; gap: 6px;
-      flex-shrink: 0;
+    .wf-header { display: flex; align-items: center; justify-content: space-between; }
+    .wf-name { font-size: 13px; font-weight: 600; }
+    .wf-steps {
+      font-size: 11px; color: var(--text2);
+      background: var(--border-light);
+      padding: 2px 8px; border-radius: 10px;
     }
-    .status-dot {
-      width: 6px; height: 6px; border-radius: 50%;
-      background: var(--accent);
-    }
-    .status-dot.busy { background: #f59e0b; animation: pulse 1s infinite; }
-    .status-dot.error { background: var(--danger); }
-    @keyframes pulse { 50% { opacity: 0.4; } }
-    .status-text { font-size: 11px; color: var(--text2); }
+    .wf-desc { font-size: 12px; color: var(--text2); line-height: 1.5; }
+    .wf-url { font-size: 11px; color: var(--accent); }
 
-    /* ---- Modal ---- */
-    .modal-overlay {
-      position: fixed; inset: 0; background: #000a;
-      display: flex; align-items: center; justify-content: center;
-      z-index: 999; display: none;
+    .btn-primary {
+      height: 30px; padding: 0 14px;
+      background: var(--accent); border: none;
+      border-radius: 20px; font-size: 12px; font-weight: 500;
+      color: white; cursor: pointer; align-self: flex-start;
+      transition: background 0.15s;
     }
-    .modal-overlay.open { display: flex; }
-    .modal {
-      background: var(--bg2); border: 1px solid var(--border);
-      border-radius: 12px; padding: 20px; width: 90%; max-width: 360px;
+    .btn-primary:hover { background: var(--accent-hover); }
+
+    /* ---- 设置面板 ---- */
+    .settings-panel {
+      flex: 1; overflow-y: auto; padding: 16px;
       display: flex; flex-direction: column; gap: 12px;
     }
-    .modal-title { font-size: 15px; font-weight: 600; }
-    .form-group { display: flex; flex-direction: column; gap: 6px; }
-    .form-label { font-size: 12px; color: var(--text2); }
-    .form-input, .form-textarea {
-      background: var(--bg3); border: 1px solid var(--border);
-      color: var(--text); border-radius: 6px; padding: 8px 10px;
-      font-size: 13px; font-family: var(--font); outline: none;
-      transition: border-color 0.15s;
-    }
-    .form-input:focus, .form-textarea:focus { border-color: var(--accent); }
-    .form-textarea { resize: vertical; min-height: 80px; }
-    .modal-actions { display: flex; gap: 8px; justify-content: flex-end; }
-    .btn-cancel {
-      padding: 7px 14px; border-radius: 6px;
-      background: var(--bg3); border: 1px solid var(--border);
-      color: var(--text2); cursor: pointer; font-size: 12px;
-    }
-    .btn-confirm {
-      padding: 7px 14px; border-radius: 6px;
-      background: var(--accent); border: none;
-      color: #fff; cursor: pointer; font-size: 12px;
-    }
-    .btn-confirm:hover { background: var(--accent2); }
 
-    .empty-state {
-      text-align: center; padding: 30px 20px; color: var(--text2);
-      font-size: 12px; line-height: 1.8;
+    .settings-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-light);
+      border-radius: var(--radius);
+      padding: 14px; box-shadow: var(--shadow-sm);
     }
+    .settings-card h3 { font-size: 13px; font-weight: 600; margin-bottom: 6px; }
+    .settings-card p { font-size: 12px; color: var(--text2); line-height: 1.6; }
+
+    .open-settings-btn {
+      height: 38px; padding: 0 20px;
+      background: var(--accent); border: none;
+      border-radius: var(--radius-sm);
+      color: white; font-size: 13px; font-weight: 500;
+      cursor: pointer; transition: background 0.15s;
+    }
+    .open-settings-btn:hover { background: var(--accent-hover); }
   </style>
 </head>
 <body>
-  <!-- Header -->
-  <div class="header">
-    <div class="header-left">
-      <svg class="logo" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-        <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 14.2c-2.5 0-4.71-1.28-6-3.22.03-1.99 4-3.08 6-3.08 1.99 0 5.97 1.09 6 3.08-1.29 1.94-3.5 3.22-6 3.22z"/>
-      </svg>
-      <span class="title">GPT Agent</span>
-      <span class="badge" id="modelBadge">gpt-5.2</span>
-    </div>
-    <div class="header-actions">
-      <button class="icon-btn" id="clearBtn" title="清空对话">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/>
-        </svg>
-      </button>
-      <button class="icon-btn" id="settingsBtn" title="设置">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
-        </svg>
-      </button>
-    </div>
+
+<!-- 顶栏 -->
+<div class="topbar">
+  <div class="app-icon">🤖</div>
+  <span class="app-title">Browser Agent</span>
+  <span class="loop-status loop-status--idle" id="loopStatus">就绪</span>
+  <button class="icon-btn" id="settingsBtn" title="设置">⚙️</button>
+</div>
+
+<!-- 标签导航 -->
+<div class="tabs">
+  <button class="tab-btn active" data-tab="chat">💬 对话</button>
+  <button class="tab-btn" data-tab="workflow">⚡ 工作流</button>
+  <button class="tab-btn" data-tab="settings-tab">🔧 设置</button>
+</div>
+
+<!-- 对话标签 -->
+<div class="tab-panel" data-tab="chat" style="display:flex">
+  <div class="toolbar">
+    <span class="toolbar-label">目标页面</span>
+    <select id="tabSelector" class="tab-select"></select>
+    <button class="toolbar-btn" id="refreshTabsBtn" title="刷新标签列表">↺</button>
+    <button class="toolbar-btn" id="createGroupBtn">＋ 分组</button>
   </div>
 
-  <!-- Tab indicator bar -->
-  <div class="tab-indicator">
-    <img class="tab-favicon" id="tabFavicon" src="" style="display:none" alt="" />
-    <span class="tab-title" id="tabTitle">未锁定 — 使用当前标签页</span>
-    <button class="icon-btn" id="lockTabBtn" title="锁定到此标签页">🎯</button>
-    <button class="icon-btn" id="unlockTabBtn" title="解除锁定" style="display:none">✕</button>
-  </div>
-  <!-- URL navigation bar -->
-  <div class="nav-bar">
-    <input type="text" class="nav-input" id="urlInput" placeholder="输入网址，按 Enter 前往..." />
-    <button class="nav-btn" id="urlNavBtn">→</button>
-  </div>
+  <div id="workflowProgress"></div>
 
-  <!-- Tabs -->
-  <div class="tabs">
-    <div class="tab active" data-tab="chat">💬 对话</div>
-    <div class="tab" data-tab="skills">⚡ Skills</div>
-    <div class="tab" data-tab="debug">🔧 调试</div>
-  </div>
-
-  <!-- Chat Panel -->
-  <div class="panel active" id="panel-chat">
-    <div class="chat-messages" id="chatMessages">
-      <div class="empty-state">
-        👋 你好！我可以帮你操作当前页面。<br/>
-        点击 📄 读取页面，或直接告诉我你想做什么。
-      </div>
-    </div>
-    <div class="chat-input-area">
-      <div class="quick-prompts" id="quickPrompts"></div>
-      <div class="input-row">
-        <textarea id="userInput" placeholder="告诉我你想做什么..." rows="1"></textarea>
-        <div class="input-actions">
-          <button class="page-btn" id="pageBtn" title="读取当前页面">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-              <polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/>
-              <line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/>
-            </svg>
-          </button>
-          <button class="screenshot-btn" id="screenshotBtn" title="截图发给 AI">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
-              <circle cx="12" cy="13" r="4"/>
-            </svg>
-          </button>
-          <button class="send-btn" id="sendBtn" title="发送 (Enter)">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
-            </svg>
-          </button>
-        </div>
+  <div id="messages">
+    <div class="message message--assistant">
+      <div class="bubble">你好！我是你的浏览器助手。<br><br>
+        输入任务描述开始，或在「⚡ 工作流」选择预设流程。<br><br>
+        <strong>示例：</strong><br>
+        • 提取这个页面的所有产品信息并保存为 CSV<br>
+        • 打开 zhipin.com 帮我筛选候选人<br>
+        • 总结当前页面的主要内容
       </div>
     </div>
   </div>
 
-  <!-- Skills Panel -->
-  <div class="panel" id="panel-skills">
-    <div class="skills-panel" style="display:flex;">
-      <div class="panel-title">已安装的 Skills</div>
-      <div id="skillsList"></div>
-      <button class="add-skill-btn" id="addSkillBtn">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
-        </svg>
-        新建 Skill
-      </button>
+  <div id="interventionPanel">
+    <div class="intervention-question" id="interventionQuestion"></div>
+    <div id="interventionOptions"></div>
+    <div id="interventionInputWrap">
+      <input type="text" id="interventionInput" class="intervention-input" placeholder="请输入..."/>
+      <button class="btn-primary" id="interventionSubmit">确认</button>
     </div>
   </div>
 
-  <!-- Debug Panel -->
-  <div class="panel" id="panel-debug">
-    <div class="debug-panel" style="display:flex;">
-      <div class="panel-title">DOM 调试器</div>
-      <div class="debug-actions">
-        <button class="debug-btn" id="snapshotBtn">📸 获取快照</button>
-        <button class="debug-btn" id="fullDomBtn">🌲 完整 DOM</button>
-        <button class="debug-btn" id="analyzeBtn">🤖 AI 分析</button>
-        <button class="debug-btn" id="fixBtn">🔧 AI 修复</button>
-      </div>
-      <div class="debug-info" id="debugInfo">点击「获取快照」开始调试...</div>
-      <div class="panel-title" style="margin-top:8px">AI 分析结果</div>
-      <div class="debug-result" id="debugResult">-</div>
+  <div id="controlBar">
+    <button class="ctrl-btn ctrl-btn--primary" id="btnStart">▶ 开始</button>
+    <button class="ctrl-btn" id="btnPause">⏸</button>
+    <button class="ctrl-btn ctrl-btn--danger" id="btnStop">⏹ 停止</button>
+  </div>
+
+  <div class="input-area">
+    <textarea id="userInput" placeholder="输入任务或问题...（Enter 发送，Shift+Enter 换行）" rows="1"></textarea>
+    <button id="sendBtn" title="发送">↑</button>
+  </div>
+</div>
+
+<!-- 工作流标签 -->
+<div class="tab-panel" data-tab="workflow">
+  <div class="workflow-panel">
+    <div class="panel-heading">预设工作流</div>
+    <div id="workflowList"></div>
+  </div>
+</div>
+
+<!-- 设置标签 -->
+<div class="tab-panel" data-tab="settings-tab">
+  <div class="settings-panel">
+    <div class="settings-card">
+      <h3>API 配置</h3>
+      <p>在完整设置页中配置 API Key、Base URL、模型和系统提示词。</p>
     </div>
-  </div>
-
-  <!-- Status bar -->
-  <div class="status-bar">
-    <div class="status-dot" id="statusDot"></div>
-    <span class="status-text" id="statusText">就绪</span>
-  </div>
-
-  <!-- Add Skill Modal -->
-  <div class="modal-overlay" id="skillModal">
-    <div class="modal">
-      <div class="modal-title">新建 Skill</div>
-      <div class="form-group">
-        <label class="form-label">名称</label>
-        <input class="form-input" id="skillName" placeholder="例如：自动回复助手" />
-      </div>
-      <div class="form-group">
-        <label class="form-label">描述</label>
-        <input class="form-input" id="skillDesc" placeholder="简短说明这个 Skill 做什么" />
-      </div>
-      <div class="form-group">
-        <label class="form-label">触发关键词（用 | 分隔）</label>
-        <input class="form-input" id="skillTrigger" placeholder="回复|留言|评论" />
-      </div>
-      <div class="form-group">
-        <label class="form-label">AI 指令</label>
-        <textarea class="form-textarea" id="skillInstructions" placeholder="告诉 AI 在此场景下应该如何工作..." rows="4"></textarea>
-      </div>
-      <div class="modal-actions">
-        <button class="btn-cancel" id="skillModalCancel">取消</button>
-        <button class="btn-confirm" id="skillModalSave">保存</button>
-      </div>
-    </div>
-  </div>
-
-  <script type="module" src="./sidepanel.ts"></script>
-
-<!-- Save debug result as Skill modal -->
-<div id="saveDebugSkillModal" class="modal-overlay">
-  <div class="modal">
-    <h3>💾 保存为 Skill</h3>
-    <p style="color:#aaa;font-size:12px;margin:0 0 12px">自动调试成功！将此次修复方案保存为 Skill 以便下次复用。</p>
-    <label>Skill 名称</label>
-    <input id="debugSkillName" type="text" placeholder="Skill 名称" />
-    <label>触发词（多个用 | 分隔）</label>
-    <input id="debugSkillTrigger" type="text" placeholder="例：操作失败|找不到元素" />
-    <label>说明</label>
-    <input id="debugSkillDesc" type="text" placeholder="这个 Skill 做什么" />
-    <label>AI 指令（已自动生成）</label>
-    <textarea id="debugSkillInstructions" rows="5" style="font-size:11px"></textarea>
-    <div class="modal-buttons">
-      <button id="debugSkillCancel" class="secondary-btn">取消</button>
-      <button id="debugSkillSave" class="primary-btn">保存 Skill</button>
+    <button class="open-settings-btn" onclick="chrome.runtime.sendMessage({type:'OPEN_SETTINGS'})">
+      打开设置页面 →
+    </button>
+    <div class="settings-card">
+      <h3>工具调用说明</h3>
+      <p>本扩展使用 OpenAI / Anthropic 原生 function calling API。AI 通过本地工具（点击、填写、截图、下载文件等）完成任务，数据不经过额外服务器。</p>
     </div>
   </div>
 </div>
+
+<script type="module" src="./sidepanel.ts"></script>
 </body>
 </html>

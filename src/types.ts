@@ -4,16 +4,38 @@
 
 export type ApiFormat = 'openai' | 'anthropic'
 
+// ---- 工作流 ----
+export type InterventionType = 'none' | 'optional' | 'required'
+
+export interface WorkflowStep {
+  id: string
+  name: string
+  instructions: string       // 给 AI 的详细指令
+  intervention: InterventionType
+  completionHint: string     // AI 判断此步完成的依据
+}
+
+export interface Workflow {
+  id: string
+  name: string
+  description: string
+  startUrl?: string
+  steps: WorkflowStep[]
+  createdAt: number
+}
+
+// ---- 设置 ----
 export interface Settings {
   baseUrl: string
   apiKey: string
   apiFormat: ApiFormat
   model: string
   systemPrompt: string
-  actionDelay: [number, number] // [min, max] ms 随机延迟范围
+  actionDelay: [number, number]
   maxActionsPerMinute: number
   prompts: SavedPrompt[]
   skills: Skill[]
+  workflows: Workflow[]
 }
 
 export interface SavedPrompt {
@@ -29,8 +51,8 @@ export interface Skill {
   id: string
   name: string
   description: string
-  trigger: string        // 关键词触发
-  instructions: string  // 给 GPT 的指令
+  trigger: string
+  instructions: string
   status: SkillStatus
   createdAt: number
   lastUsed?: number
@@ -58,6 +80,11 @@ export type MessageType =
   | 'CONFIGURE_RATE_LIMIT'
   | 'GET_ACTIVE_TAB'
   | 'EXECUTE_ACTION_IN_TAB'
+  | 'OPEN_TAB'
+  | 'CREATE_TAB_GROUP'
+  | 'CLOSE_TAB_GROUP'
+  | 'DOWNLOAD_DATA'
+  | 'GET_ALL_TABS'
 
 export interface Message {
   type: MessageType
@@ -69,13 +96,13 @@ export interface Message {
 export interface PageSnapshot {
   url: string
   title: string
-  text: string          // 可读文本
+  text: string
   interactiveElements: InteractiveElement[]
-  html?: string         // 调试模式下附带精简 HTML
+  html?: string
 }
 
 export interface InteractiveElement {
-  ref: string           // @e1, @e2 ...
+  ref: string
   tag: string
   type?: string
   text?: string
@@ -85,7 +112,7 @@ export interface InteractiveElement {
   rect: DOMRect | { top: number; left: number; width: number; height: number }
 }
 
-// ---- AI 动作 ----
+// ---- AI 动作（保留供 content.ts 内部使用）----
 export type ActionType =
   | 'click'
   | 'fill'
@@ -98,13 +125,13 @@ export type ActionType =
 
 export interface AgentAction {
   action: ActionType
-  ref?: string           // 目标元素 @eN
-  value?: string         // fill / select 的值
-  key?: string           // press 的键名
-  url?: string           // navigate
+  ref?: string
+  value?: string
+  key?: string
+  url?: string
   direction?: 'up' | 'down'
   pixels?: number
-  ms?: number            // wait
+  ms?: number
 }
 
 export interface ActionResult {
@@ -115,12 +142,39 @@ export interface ActionResult {
 }
 
 // ---- Chat ----
-export type Role = 'user' | 'assistant' | 'system'
+export type Role = 'user' | 'assistant' | 'system' | 'tool'
 
 export interface ChatMessage {
   id: string
   role: Role
   content: string
-  imageDataUrl?: string   // 截图附件
+  imageDataUrl?: string
   timestamp: number
+  toolCallId?: string      // tool result 消息关联的 call id
+  toolName?: string        // 显示日志用
+  isToolLog?: boolean      // UI 中以工具调用日志样式显示
+}
+
+// ---- Tool Calling ----
+export interface ToolCallRequest {
+  id: string
+  name: string
+  arguments: Record<string, unknown>
+}
+
+export interface ToolCallResponse {
+  id: string
+  name: string
+  result: string           // 序列化后的结果字符串
+  error?: string
+}
+
+// Agent Loop 状态
+export type LoopState = 'idle' | 'running' | 'paused' | 'waiting_user' | 'completed' | 'error'
+
+// 用户介入请求（ask_user 工具触发）
+export interface InterventionRequest {
+  question: string
+  options?: string[]       // 若有选项则显示按钮，否则文本输入
+  placeholder?: string
 }

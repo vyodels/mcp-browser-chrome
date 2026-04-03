@@ -1,683 +1,498 @@
 // ============================================================
-// sidepanel.ts — 侧边栏主逻辑
+// sidepanel.ts — 侧边栏主逻辑 v2
+// Agent Loop 控制 + Tool Calling + 工作流执行 + Apple 风格 UI
 // ============================================================
-import type { ChatMessage, Skill, AgentAction, ActionResult, PageSnapshot, TabInfo } from './types'
-import { loadSettings, saveSettings } from './store'
-import { chat, parseActions } from './openai'
-import { throttleAction } from './rateLimit'
+import { loadSettings } from './store'
+import { chatWithTools } from './openai'
+import { TOOL_DEFINITIONS, executeTool, formatToolResult } from './tools'
+import { createTaskTabGroup, getAllTabs } from './tabManager'
+import { buildStepSystemPrompt } from './workflow'
+import type { Settings, LoopState, InterventionRequest, Workflow } from './types'
+import type { ToolCallRequest } from './tools'
 
-// ---- State ----
-let chatHistory: ChatMessage[] = []
-let pendingScreenshot: string | null = null
-let isStreaming = false
-let lastSnapshot: PageSnapshot | null = null
-let lastError: string | null = null
-let autoDebugRound = 0
-const MAX_AUTO_DEBUG_ROUNDS = 3
-let targetTabId: number | null = null
-let targetTabInfo: TabInfo | null = null
+// ============================================================
+// 状态
+// ============================================================
+let settings: Settings
+let loopState: LoopState = 'idle'
+let loopMessages: object[] = []
+let loopAbortController: AbortController | null = null
+let targetTabId: number | undefined
+let taskTabGroupId: number | undefined
+let taskName = '新任务'
+let currentWorkflow: Workflow | null = null
+let currentStepIndex = 0
+let pendingIntervention: ((answer: string) => void) | null = null
 
-// ---- Rate limit config ----
-function applyRateLimitConfig(settings: import('./types').Settings) {
-  chrome.runtime.sendMessage({
-    type: 'CONFIGURE_RATE_LIMIT',
-    payload: { max: settings.maxActionsPerMinute, delay: settings.actionDelay },
-  })
-}
-
-// ---- Tab targeting ----
-async function lockToTab(tabId: number) {
-  try {
-    const tab = await chrome.tabs.get(tabId)
-    targetTabId = tabId
-    targetTabInfo = { id: tabId, url: tab.url ?? '', title: tab.title ?? '', favIconUrl: tab.favIconUrl }
-    updateTabBar()
-  } catch { /* tab closed */ }
-}
-
-function unlockTab() {
-  targetTabId = null
-  targetTabInfo = null
-  updateTabBar()
-}
-
-function updateTabBar() {
-  const favicon = document.getElementById('tabFavicon') as HTMLImageElement
-  const title = document.getElementById('tabTitle') as HTMLElement
-  const lockBtn = document.getElementById('lockTabBtn') as HTMLButtonElement
-  const unlockBtn = document.getElementById('unlockTabBtn') as HTMLButtonElement
-
-  if (targetTabInfo) {
-    if (targetTabInfo.favIconUrl) {
-      favicon.src = targetTabInfo.favIconUrl
-      favicon.style.display = ''
-    } else {
-      favicon.style.display = 'none'
-    }
-    title.textContent = targetTabInfo.title || targetTabInfo.url
-    lockBtn.style.display = 'none'
-    unlockBtn.style.display = ''
-  } else {
-    favicon.style.display = 'none'
-    title.textContent = '未锁定 — 使用当前标签页'
-    lockBtn.style.display = ''
-    unlockBtn.style.display = 'none'
-  }
-}
-
-async function navigateUrl() {
-  const input = document.getElementById('urlInput') as HTMLInputElement
-  let url = input.value.trim()
-  if (!url) return
-  if (!url.startsWith('http://') && !url.startsWith('https://')) url = 'https://' + url
-
-  if (targetTabId) {
-    await chrome.tabs.update(targetTabId, { url })
-  } else {
-    const tab = await chrome.tabs.create({ url })
-    if (tab.id) await lockToTab(tab.id)
-  }
-  input.value = ''
-}
-
-// ---- Init ----
-async function init() {
-  const settings = await loadSettings()
-  applyRateLimitConfig(settings)
-  ;(document.getElementById('modelBadge') as HTMLElement).textContent = settings.model
-
-  renderQuickPrompts()
-  renderSkills()
-
-  // Tabs
-  document.querySelectorAll('.tab').forEach((tab) => {
-    tab.addEventListener('click', () => {
-      const name = (tab as HTMLElement).dataset.tab!
-      document.querySelectorAll('.tab').forEach((t) => t.classList.remove('active'))
-      document.querySelectorAll('.panel').forEach((p) => p.classList.remove('active'))
-      tab.classList.add('active')
-      document.getElementById(`panel-${name}`)!.classList.add('active')
-    })
-  })
-
-  document.getElementById('sendBtn')!.addEventListener('click', sendMessage)
-  document.getElementById('pageBtn')!.addEventListener('click', readPage)
-  document.getElementById('screenshotBtn')!.addEventListener('click', takeScreenshot)
-  document.getElementById('clearBtn')!.addEventListener('click', clearChat)
-  document.getElementById('settingsBtn')!.addEventListener('click', () =>
-    chrome.runtime.sendMessage({ type: 'OPEN_SETTINGS' })
-  )
-
-  const input = document.getElementById('userInput') as HTMLTextAreaElement
-  input.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage() }
-  })
-  input.addEventListener('input', () => {
-    input.style.height = 'auto'
-    input.style.height = Math.min(input.scrollHeight, 120) + 'px'
-  })
-
-  document.getElementById('addSkillBtn')!.addEventListener('click', () =>
-    (document.getElementById('skillModal') as HTMLElement).classList.add('open')
-  )
-  document.getElementById('skillModalCancel')!.addEventListener('click', closeSkillModal)
-  document.getElementById('skillModalSave')!.addEventListener('click', saveSkill)
-
-  document.getElementById('snapshotBtn')!.addEventListener('click', debugSnapshot)
-  document.getElementById('fullDomBtn')!.addEventListener('click', debugFullDom)
-  document.getElementById('analyzeBtn')!.addEventListener('click', aiAnalyzeDebug)
-  document.getElementById('fixBtn')!.addEventListener('click', aiFixDebug)
-  document.getElementById('debugSkillCancel')!.addEventListener('click', closeDebugSkillModal)
-  document.getElementById('debugSkillSave')!.addEventListener('click', saveDebugSkill)
-
-  document.getElementById('lockTabBtn')!.addEventListener('click', () => {
-    chrome.runtime.sendMessage({ type: 'GET_ACTIVE_TAB' }, (resp) => {
-      if (resp?.success && resp.tab) {
-        targetTabId = resp.tab.id
-        targetTabInfo = resp.tab as TabInfo
-        updateTabBar()
-      }
-    })
-  })
-  document.getElementById('unlockTabBtn')!.addEventListener('click', unlockTab)
-  document.getElementById('urlNavBtn')!.addEventListener('click', navigateUrl)
-  ;(document.getElementById('urlInput') as HTMLInputElement).addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') navigateUrl()
-  })
-}
-
-// ---- Chat ----
-async function sendMessage() {
-  if (isStreaming) return
-  const input = document.getElementById('userInput') as HTMLTextAreaElement
-  const text = input.value.trim()
-  if (!text) return
-
-  input.value = ''
-  input.style.height = 'auto'
-
-  const userMsg = appendMessage('user', text, pendingScreenshot ?? undefined)
-  chatHistory.push(userMsg)
-  pendingScreenshot = null
-  ;(input as HTMLTextAreaElement).placeholder = '告诉我你想做什么...'
-
-  setStatus('busy', '读取页面...')
-  setLoading(true)
-
-  // 每次发消息前自动拉取当前页面快照
-  try {
-    const pageResp = await new Promise<{ success: boolean; snapshot?: PageSnapshot; tabId?: number }>((resolve) => {
-      chrome.runtime.sendMessage({ type: 'GET_PAGE_CONTENT', targetTabId: targetTabId ?? undefined }, resolve)
-    })
-    if (pageResp?.success && pageResp.snapshot) {
-      lastSnapshot = pageResp.snapshot
-      if (!targetTabId && pageResp.tabId) await lockToTab(pageResp.tabId)
-    }
-  } catch { /* chrome:// 等特殊页面无法注入，忽略 */ }
-
-  setStatus('busy', '正在思考...')
-
-  try {
-    const settings = await loadSettings()
-    const skill = matchSkill(text, settings.skills)
-
-    let contextText = text
-    if (skill) {
-      contextText = `[使用 Skill: ${skill.name}]\n${skill.instructions}\n\n用户请求：${text}`
-      setStatus('busy', `执行 Skill: ${skill.name}`)
-    }
-
-    if (lastSnapshot) {
-      contextText += `\n\n【当前页面】\nURL: ${lastSnapshot.url}\n标题: ${lastSnapshot.title}\n\n页面文本:\n${
-        lastSnapshot.text.slice(0, 2000)
-      }\n\n交互元素:\n${
-        lastSnapshot.interactiveElements
-          .slice(0, 40)
-          .map((el) => `  ${el.ref} [${el.tag}] "${el.text ?? el.placeholder ?? el.ariaLabel ?? ''}"`)
-          .join('\n')
-      }`
-    }
-
-    const assistantBubble = appendStreamingMessage()
-    isStreaming = true
-    let fullReply = ''
-
-    await chat(chatHistory, contextText, settings, userMsg.imageDataUrl, (delta) => {
-      fullReply += delta
-      updateStreamingMessage(assistantBubble, fullReply)
-    })
-
-    finalizeStreamingMessage(assistantBubble, fullReply)
-    chatHistory.push({ id: genId(), role: 'assistant', content: fullReply, timestamp: Date.now() })
-
-    const actions = parseActions(fullReply)
-    if (actions.length > 0) await executeActions(actions)
-
-    setStatus('ready', '就绪')
-  } catch (e) {
-    appendMessage('assistant', `❌ 错误：${String(e)}`)
-    setStatus('error', String(e).slice(0, 50))
-  } finally {
-    isStreaming = false
-    setLoading(false)
-  }
-}
-
-async function executeActions(actions: AgentAction[]) {
-  let remaining = [...actions]
-  const completedActions: AgentAction[] = []
-  const pageUrlAtStart = lastSnapshot?.url ?? ''
-
-  while (remaining.length > 0) {
-    const action = remaining[0]
-    setStatus('busy', `执行: ${action.action} ${action.ref ?? action.url ?? ''}`)
-    await throttleAction()
-
-    const result = await new Promise<ActionResult>((resolve) => {
-      chrome.runtime.sendMessage(
-        { type: 'EXECUTE_ACTION_IN_TAB', targetTabId: targetTabId ?? undefined, payload: { type: 'EXECUTE_ACTION', payload: action } },
-        resolve
-      )
-    })
-
-    const logEl = document.createElement('div')
-    logEl.className = `action-log ${result.success ? 'success' : 'error'}`
-    logEl.textContent = `${result.success ? '✓' : '✗'} ${action.action}${action.ref ? ' ' + action.ref : ''}: ${result.message}`
-    document.getElementById('chatMessages')!.appendChild(logEl)
-    scrollToBottom()
-
-    if (result.snapshot) lastSnapshot = result.snapshot
-
-    if (result.success) {
-      completedActions.push(action)
-      remaining.shift()
-      continue
-    }
-
-    // Action failed
-    lastError = result.message
-
-    if (autoDebugRound < MAX_AUTO_DEBUG_ROUNDS) {
-      autoDebugRound++
-      setStatus('busy', `自动调试第 ${autoDebugRound}/${MAX_AUTO_DEBUG_ROUNDS} 轮...`)
-      try {
-        const fixedActions = await runAutoDebug(action, result.message)
-        if (fixedActions) {
-          remaining = [...fixedActions, ...remaining.slice(1)]
-          continue
-        }
-        // AI returned no fix — stop immediately
-        autoDebugRound = 0
-        appendMessage('assistant', `⚠️ 自动调试未能生成修复方案：${result.message}\n\n切换到「🔧 调试」标签手动分析。`)
-      } catch (debugErr) {
-        autoDebugRound = 0
-        appendMessage('assistant', `⚠️ 自动调试出错：${String(debugErr)}\n\n切换到「🔧 调试」标签手动分析。`)
-      }
-      return
-    }
-
-    // Rounds exhausted
-    autoDebugRound = 0
-    appendMessage(
-      'assistant',
-      `⚠️ 已自动调试 ${MAX_AUTO_DEBUG_ROUNDS} 轮仍未成功。\n\n` +
-      `最后错误：${result.message}\n\n` +
-      `是否继续？请回复「继续调试」让我再次尝试，或切换到「🔧 调试」标签手动分析。`
-    )
-    return
-  }
-
-  const wasAutoDebugUsed = autoDebugRound > 0
-  autoDebugRound = 0
-  lastError = null
-
-  if (wasAutoDebugUsed && completedActions.length > 0) {
-    offerSaveDebugAsSkill(completedActions, pageUrlAtStart)
-  }
-}
-
-// ---- Page actions ----
-function readPage() {
-  setStatus('busy', '读取页面...')
-  chrome.runtime.sendMessage({ type: 'GET_PAGE_CONTENT', targetTabId: targetTabId ?? undefined }, async (resp) => {
-    if (resp?.success) {
-      lastSnapshot = resp.snapshot as PageSnapshot
-      if (!targetTabId && resp.tabId) await lockToTab(resp.tabId)
-      const snap = lastSnapshot!
-      appendMessage('assistant', `📄 已读取页面\n\n**${snap.title}**\n${snap.url}\n\n找到 ${snap.interactiveElements.length} 个交互元素`)
-      setStatus('ready', '页面已读取')
-    } else {
-      setStatus('error', '读取失败')
-    }
-  })
-}
-
-function takeScreenshot() {
-  setStatus('busy', '截图中...')
-  chrome.runtime.sendMessage({ type: 'TAKE_SCREENSHOT', targetTabId: targetTabId ?? undefined }, (resp) => {
-    if (resp?.success) {
-      pendingScreenshot = resp.dataUrl as string
-      ;(document.getElementById('userInput') as HTMLTextAreaElement).placeholder = '📸 截图已附加，输入你的问题...'
-      ;(document.getElementById('userInput') as HTMLTextAreaElement).focus()
-      setStatus('ready', '截图已附加')
-    } else {
-      setStatus('error', '截图失败')
-    }
-  })
-}
-
-// ---- Skills ----
-function matchSkill(text: string, skills: Skill[]): Skill | null {
-  for (const skill of skills) {
-    if (skill.status !== 'active') continue
-    if (skill.trigger.split('|').some((k) => text.includes(k.trim()))) return skill
-  }
-  return null
-}
-
-async function quickParseWithSkill(skillId: string) {
-  if (isStreaming) return
-
-  setStatus('busy', '读取页面...')
-  const pageResp = await new Promise<{ success: boolean; snapshot?: PageSnapshot }>((resolve) => {
-    chrome.runtime.sendMessage({ type: 'GET_PAGE_CONTENT' }, resolve)
-  })
-  if (!pageResp?.success || !pageResp.snapshot) {
-    setStatus('error', '读取页面失败')
-    return
-  }
-  lastSnapshot = pageResp.snapshot
-
-  const settings = await loadSettings()
-  const skill = settings.skills.find((s) => s.id === skillId)
-  if (!skill) return
-
-  const snap = lastSnapshot
-  const contextText = `[使用 Skill: ${skill.name}]\n${skill.instructions}\n\n【当前页面快照】\nURL: ${snap.url}\n标题: ${snap.title}\n\n页面文本:\n${snap.text.slice(0, 3000)}\n\n交互元素:\n${
-    snap.interactiveElements.slice(0, 30).map((el) => `  ${el.ref} [${el.tag}] "${el.text ?? el.placeholder ?? el.ariaLabel ?? ''}"`).join('\n')
-  }`
-
-  const userMsg = appendMessage('user', `[一键解析] 使用 Skill「${skill.name}」解析当前页面`)
-  chatHistory.push(userMsg)
-  setStatus('busy', `执行 Skill: ${skill.name}`)
-  setLoading(true)
-  isStreaming = true
-
-  try {
-    const assistantBubble = appendStreamingMessage()
-    let fullReply = ''
-    await chat(chatHistory, contextText, settings, undefined, (delta) => {
-      fullReply += delta
-      updateStreamingMessage(assistantBubble, fullReply)
-    })
-    finalizeStreamingMessage(assistantBubble, fullReply)
-    chatHistory.push({ id: genId(), role: 'assistant', content: fullReply, timestamp: Date.now() })
-
-    const actions = parseActions(fullReply)
-    if (actions.length > 0) await executeActions(actions)
-    setStatus('ready', '就绪')
-  } catch (e) {
-    appendMessage('assistant', `❌ 错误：${String(e)}`)
-    setStatus('error', String(e).slice(0, 50))
-  } finally {
-    isStreaming = false
-    setLoading(false)
-  }
-}
-
-async function renderSkills() {
-  const settings = await loadSettings()
-  const list = document.getElementById('skillsList')!
-  list.innerHTML = ''
-
-  if (settings.skills.length === 0) {
-    list.innerHTML = '<div class="empty-state">还没有 Skills，点击下方按钮创建</div>'
-    return
-  }
-
-  settings.skills.forEach((skill) => {
-    const card = document.createElement('div')
-    card.className = `skill-card ${skill.status}`
-    card.innerHTML = `
-      <div class="skill-header">
-        <span class="skill-name">${skill.name}</span>
-        <span class="skill-badge ${skill.status}">${skill.status === 'active' ? '启用' : skill.status === 'disabled' ? '停用' : '错误'}</span>
-      </div>
-      <div class="skill-desc">${skill.description}</div>
-      <div class="skill-trigger">触发词: ${skill.trigger}</div>
-      <div class="skill-actions">
-        <button class="skill-btn" data-id="${skill.id}" data-action="parse">解析当前页面</button>
-        <button class="skill-btn" data-id="${skill.id}" data-action="toggle">${skill.status === 'active' ? '停用' : '启用'}</button>
-        <button class="skill-btn danger" data-id="${skill.id}" data-action="delete">删除</button>
-      </div>`
-    list.appendChild(card)
-  })
-
-  list.querySelectorAll('.skill-btn').forEach((btn) => {
-    btn.addEventListener('click', async (e) => {
-      const el = e.target as HTMLElement
-      const id = el.dataset.id!
-      const action = el.dataset.action!
-      const s = await loadSettings()
-      if (action === 'parse') {
-        document.querySelector<HTMLElement>('.tab[data-tab="chat"]')!.click()
-        quickParseWithSkill(id)
-      } else if (action === 'delete') {
-        await saveSettings({ skills: s.skills.filter((sk) => sk.id !== id) })
-      } else if (action === 'toggle') {
-        await saveSettings({
-          skills: s.skills.map((sk) =>
-            sk.id === id ? { ...sk, status: (sk.status === 'active' ? 'disabled' : 'active') as Skill['status'] } : sk
-          ),
-        })
-      }
-      renderSkills()
+// ============================================================
+// 消息封装
+// ============================================================
+function sendMsg(msg: object): Promise<unknown> {
+  return new Promise((resolve) => {
+    chrome.runtime.sendMessage(msg, (resp) => {
+      if (chrome.runtime.lastError) resolve({ success: false, error: chrome.runtime.lastError.message })
+      else resolve(resp ?? { success: true })
     })
   })
 }
 
-async function saveSkill() {
-  const name = (document.getElementById('skillName') as HTMLInputElement).value.trim()
-  const desc = (document.getElementById('skillDesc') as HTMLInputElement).value.trim()
-  const trigger = (document.getElementById('skillTrigger') as HTMLInputElement).value.trim()
-  const instructions = (document.getElementById('skillInstructions') as HTMLTextAreaElement).value.trim()
-  if (!name || !instructions) { alert('名称和 AI 指令不能为空'); return }
-  if (!trigger) { alert('触发词不能为空，否则 Skill 永远不会被激活'); return }
+// ============================================================
+// DOM 辅助
+// ============================================================
+function el<T extends HTMLElement>(id: string): T { return document.getElementById(id) as T }
 
-  const settings = await loadSettings()
-  await saveSettings({
-    skills: [...settings.skills, {
-      id: genId(), name, description: desc, trigger, instructions,
-      status: 'active' as const, createdAt: Date.now(),
-    }],
-  })
-  closeSkillModal()
-  renderSkills()
-}
-
-function closeSkillModal() {
-  ;(document.getElementById('skillModal') as HTMLElement).classList.remove('open')
-  ;['skillName', 'skillDesc', 'skillTrigger'].forEach((id) => ((document.getElementById(id) as HTMLInputElement).value = ''))
-  ;(document.getElementById('skillInstructions') as HTMLTextAreaElement).value = ''
-}
-
-// ---- Debug ----
-function debugSnapshot() {
-  chrome.runtime.sendMessage({ type: 'GET_PAGE_CONTENT', targetTabId: targetTabId ?? undefined }, (resp) => {
-    if (resp?.success) {
-      lastSnapshot = resp.snapshot as PageSnapshot
-      const snap = lastSnapshot!
-      ;(document.getElementById('debugInfo') as HTMLElement).textContent =
-        `URL: ${snap.url}\n标题: ${snap.title}\n\n交互元素 (${snap.interactiveElements.length}):\n` +
-        snap.interactiveElements.map((el) => `  ${el.ref} <${el.tag}> "${el.text ?? el.placeholder ?? ''}"`).join('\n')
-    }
-  })
-}
-
-function debugFullDom() {
-  chrome.runtime.sendMessage(
-    { type: 'EXECUTE_ACTION_IN_TAB', targetTabId: targetTabId ?? undefined, payload: { type: 'DEBUG_DOM' } },
-    (resp) => {
-      if (resp?.success) {
-        lastSnapshot = resp.snapshot as PageSnapshot
-        ;(document.getElementById('debugInfo') as HTMLElement).textContent =
-          (lastSnapshot!.html ?? '').slice(0, 5000) + '\n...(截断)'
-      }
-    }
-  )
-}
-
-async function aiAnalyzeDebug() {
-  if (!lastSnapshot) { debugSnapshot(); await new Promise((r) => setTimeout(r, 600)) }
-  setStatus('busy', 'AI 分析中...')
-  try {
-    const settings = await loadSettings()
-    const result = await chat(
-      [],
-      `请分析以下页面快照，指出结构特点、可能导致操作失败的原因及建议：\n\n${JSON.stringify(lastSnapshot, null, 2).slice(0, 4000)}`,
-      settings
-    )
-    ;(document.getElementById('debugResult') as HTMLElement).textContent = result
-    setStatus('ready', '分析完成')
-  } catch (e) { setStatus('error', String(e)) }
-}
-
-async function aiFixDebug() {
-  if (!lastSnapshot) { debugSnapshot(); await new Promise((r) => setTimeout(r, 600)) }
-  setStatus('busy', 'AI 修复中...')
-  try {
-    const settings = await loadSettings()
-    const result = await chat(
-      [],
-      `以下是页面快照${lastError ? `和错误信息「${lastError}」` : ''}。\n请分析失败原因，并用 \`\`\`json\n[动作列表]\n\`\`\` 格式返回修正操作：\n\n${JSON.stringify(lastSnapshot, null, 2).slice(0, 4000)}`,
-      settings
-    )
-    ;(document.getElementById('debugResult') as HTMLElement).textContent = result
-    setStatus('ready', '修复建议已生成')
-    const actions = parseActions(result)
-    if (actions.length > 0) {
-      appendMessage('assistant', `🔧 调试器生成了 ${actions.length} 个修复动作，请查看调试面板结果。`)
-      document.querySelector<HTMLElement>('.tab[data-tab="chat"]')!.click()
-    }
-  } catch (e) { setStatus('error', String(e)) }
-}
-
-async function runAutoDebug(failedAction: AgentAction, errorMsg: string): Promise<AgentAction[] | null> {
-  const snapResp = await new Promise<{ success: boolean; snapshot?: PageSnapshot }>((resolve) => {
-    chrome.runtime.sendMessage(
-      { type: 'EXECUTE_ACTION_IN_TAB', targetTabId: targetTabId ?? undefined, payload: { type: 'DEBUG_DOM' } },
-      resolve
-    )
-  })
-  if (!snapResp?.success || !snapResp.snapshot) return null
-
-  lastSnapshot = snapResp.snapshot
-
-  const settings = await loadSettings()
-  const prompt = `页面操作失败。
-失败动作: ${JSON.stringify(failedAction)}
-错误信息: ${errorMsg}
-
-请分析以下页面 DOM，找出正确的操作方式，用 \`\`\`json\n[动作列表]\n\`\`\` 格式返回修正后的操作：
-
-${JSON.stringify({ url: snapResp.snapshot.url, title: snapResp.snapshot.title, interactiveElements: snapResp.snapshot.interactiveElements.slice(0, 50), html: (snapResp.snapshot.html ?? '').slice(0, 3000) }, null, 2)}`
-
-  const result = await chat([], prompt, settings)
-  const actions = parseActions(result)
-  if (actions.length === 0) return null
-
-  const logEl = document.createElement('div')
-  logEl.className = 'action-log'
-  logEl.textContent = `🔍 自动调试第 ${autoDebugRound} 轮：AI 生成 ${actions.length} 个修复动作`
-  document.getElementById('chatMessages')!.appendChild(logEl)
-  scrollToBottom()
-
-  return actions
-}
-
-function offerSaveDebugAsSkill(workingActions: AgentAction[], pageUrl: string) {
-  const hostname = (() => { try { return new URL(pageUrl).hostname } catch { return pageUrl } })()
-  const date = new Date().toLocaleDateString('zh-CN')
-  ;(document.getElementById('debugSkillName') as HTMLInputElement).value = `${hostname} 操作修复 - ${date}`
-  ;(document.getElementById('debugSkillTrigger') as HTMLInputElement).value = `${hostname}|操作失败`
-  ;(document.getElementById('debugSkillDesc') as HTMLInputElement).value = `针对 ${hostname} 的自动修复操作序列`
-  ;(document.getElementById('debugSkillInstructions') as HTMLTextAreaElement).value =
-    `[自动生成于 ${pageUrl}]\n\n以下是调试成功的操作步骤，可直接复用：\n\n\`\`\`json\n${JSON.stringify(workingActions, null, 2)}\n\`\`\``
-  ;(document.getElementById('saveDebugSkillModal') as HTMLElement).classList.add('open')
-}
-
-function closeDebugSkillModal() {
-  ;(document.getElementById('saveDebugSkillModal') as HTMLElement).classList.remove('open')
-}
-
-async function saveDebugSkill() {
-  const name = (document.getElementById('debugSkillName') as HTMLInputElement).value.trim()
-  const trigger = (document.getElementById('debugSkillTrigger') as HTMLInputElement).value.trim()
-  const desc = (document.getElementById('debugSkillDesc') as HTMLInputElement).value.trim()
-  const instructions = (document.getElementById('debugSkillInstructions') as HTMLTextAreaElement).value.trim()
-  if (!name || !trigger || !instructions) { alert('名称、触发词和 AI 指令不能为空'); return }
-  const settings = await loadSettings()
-  await saveSettings({
-    skills: [...settings.skills, {
-      id: genId(), name, description: desc, trigger, instructions,
-      status: 'active' as const, createdAt: Date.now(),
-    }],
-  })
-  closeDebugSkillModal()
-  renderSkills()
-  appendMessage('assistant', `✅ Skill「${name}」已保存，下次遇到相同页面会自动激活。`)
-}
-
-// ---- Quick Prompts ----
-async function renderQuickPrompts() {
-  const settings = await loadSettings()
-  const container = document.getElementById('quickPrompts')!
-  container.innerHTML = ''
-  settings.prompts.forEach((p) => {
-    const chip = document.createElement('button')
-    chip.className = 'prompt-chip'
-    chip.textContent = p.title
-    chip.addEventListener('click', () => {
-      ;(document.getElementById('userInput') as HTMLTextAreaElement).value = p.content
-    })
-    container.appendChild(chip)
-  })
-}
-
-// ---- UI helpers ----
-function appendMessage(role: 'user' | 'assistant', content: string, imageDataUrl?: string): ChatMessage {
-  const msg: ChatMessage = { id: genId(), role, content, timestamp: Date.now(), imageDataUrl }
-  const container = document.getElementById('chatMessages')!
-  container.querySelector('.empty-state')?.remove()
-  const div = document.createElement('div')
-  div.className = `message ${role}`
-  div.innerHTML = `<div class="message-bubble">${formatContent(content)}${imageDataUrl ? `<img src="${imageDataUrl}" alt="截图"/>` : ''}</div><div class="message-time">${formatTime(msg.timestamp)}</div>`
-  container.appendChild(div)
-  scrollToBottom()
-  return msg
-}
-
-function appendStreamingMessage(): HTMLElement {
-  const container = document.getElementById('chatMessages')!
-  container.querySelector('.empty-state')?.remove()
-  const div = document.createElement('div')
-  div.className = 'message assistant'
-  div.innerHTML = `<div class="message-bubble streaming"></div><div class="message-time">${formatTime(Date.now())}</div>`
-  container.appendChild(div)
-  scrollToBottom()
-  return div.querySelector('.message-bubble')!
-}
-
-function updateStreamingMessage(el: HTMLElement, content: string) {
-  el.textContent = content; scrollToBottom()
-}
-
-function finalizeStreamingMessage(el: HTMLElement, content: string) {
-  el.classList.remove('streaming'); el.innerHTML = formatContent(content)
-}
-
-function clearChat() {
-  chatHistory = []; lastSnapshot = null; lastError = null
-  document.getElementById('chatMessages')!.innerHTML = '<div class="empty-state">对话已清空 ✨<br/>可以重新开始了。</div>'
-}
-
-function setStatus(state: 'ready' | 'busy' | 'error', text: string) {
-  document.getElementById('statusDot')!.className = `status-dot ${state === 'ready' ? '' : state}`
-  document.getElementById('statusText')!.textContent = text
-}
-
-function setLoading(loading: boolean) {
-  ;(document.getElementById('sendBtn') as HTMLButtonElement).disabled = loading
-}
-
-function scrollToBottom() {
-  const c = document.getElementById('chatMessages')!; c.scrollTop = c.scrollHeight
+function escHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
 
 function formatContent(text: string): string {
-  return text
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-    .replace(/`(.*?)`/g, '<code style="background:#ffffff18;padding:1px 4px;border-radius:3px">$1</code>')
-    .replace(/\n/g, '<br/>')
+  return escHtml(text)
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/`(.+?)`/g, '<code>$1</code>')
+    .replace(/\n/g, '<br>')
 }
 
-function formatTime(ts: number): string {
-  return new Date(ts).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+function scrollToBottom() {
+  const msgs = el('messages')
+  if (msgs) msgs.scrollTop = msgs.scrollHeight
 }
 
-function genId(): string { return Math.random().toString(36).slice(2) }
+function appendMessage(role: string, content: string, opts: {
+  isLog?: boolean; isError?: boolean; imageDataUrl?: string
+} = {}): HTMLElement {
+  const msgs = el('messages')
+  const div = document.createElement('div')
 
-// ---- Listen for settings changes from options page ----
-chrome.runtime.onMessage.addListener((message) => {
-  if (message.type === 'SETTINGS_UPDATED') {
-    loadSettings().then((settings) => {
-      ;(document.getElementById('modelBadge') as HTMLElement).textContent = settings.model
-      applyRateLimitConfig(settings)
-      renderQuickPrompts()
-      renderSkills()
-    })
+  if (opts.isLog) {
+    div.className = `tool-log${opts.isError ? ' tool-log--error' : ''}`
+    div.innerHTML = `<span class="tool-log-icon">${opts.isError ? '✗' : '✓'}</span><span>${escHtml(content)}</span>`
+  } else {
+    div.className = `message message--${role}`
+    const bubble = document.createElement('div')
+    bubble.className = 'bubble'
+    if (opts.imageDataUrl) {
+      bubble.innerHTML = `<img src="${opts.imageDataUrl}" class="screenshot-preview" alt="screenshot"/><p>${formatContent(content)}</p>`
+    } else {
+      bubble.innerHTML = formatContent(content)
+    }
+    div.appendChild(bubble)
   }
-})
 
-init()
+  msgs.appendChild(div)
+  scrollToBottom()
+  return div
+}
+
+function appendStreamingMessage(role: string): { append: (chunk: string) => void; getText: () => string } {
+  let full = ''
+  const div = appendMessage(role, '')
+  const bubble = div.querySelector('.bubble')!
+  return {
+    append(chunk: string) {
+      full += chunk
+      bubble.innerHTML = formatContent(full)
+      scrollToBottom()
+    },
+    getText() { return full },
+  }
+}
+
+// ============================================================
+// Loop 状态管理
+// ============================================================
+function setLoopState(state: LoopState) {
+  loopState = state
+  const labels: Record<LoopState, string> = {
+    idle: '就绪', running: '运行中', paused: '已暂停',
+    waiting_user: '等待输入', completed: '已完成', error: '出错',
+  }
+  el('loopStatus').textContent = labels[state]
+  el('loopStatus').className = `loop-status loop-status--${state}`
+  el('controlBar').style.display = state === 'idle' ? 'none' : 'flex'
+
+  const btnStart = el<HTMLButtonElement>('btnStart')
+  const btnPause = el<HTMLButtonElement>('btnPause')
+  const btnStop = el<HTMLButtonElement>('btnStop')
+  btnStart.disabled = state === 'running' || state === 'waiting_user'
+  btnStart.textContent = state === 'paused' ? '▶ 继续' : '▶ 开始'
+  btnPause.disabled = state !== 'running'
+  btnStop.disabled = state === 'idle' || state === 'completed'
+}
+
+// ============================================================
+// 用户介入 UI
+// ============================================================
+function showIntervention(req: InterventionRequest): Promise<string> {
+  return new Promise((resolve) => {
+    pendingIntervention = resolve
+    el('interventionQuestion').textContent = req.question
+    el('interventionOptions').innerHTML = ''
+    el<HTMLInputElement>('interventionInput').value = ''
+
+    if (req.options?.length) {
+      el('interventionInputWrap').style.display = 'none'
+      req.options.forEach((opt) => {
+        const btn = document.createElement('button')
+        btn.className = 'intervention-option'
+        btn.textContent = opt
+        btn.onclick = () => resolveIntervention(opt)
+        el('interventionOptions').appendChild(btn)
+      })
+    } else {
+      el('interventionInputWrap').style.display = 'flex'
+      el<HTMLInputElement>('interventionInput').placeholder = req.placeholder ?? '请输入...'
+    }
+
+    el('interventionPanel').style.display = 'block'
+    el('interventionPanel').scrollIntoView({ behavior: 'smooth' })
+  })
+}
+
+function resolveIntervention(answer: string) {
+  if (!pendingIntervention) return
+  el('interventionPanel').style.display = 'none'
+  const resolve = pendingIntervention
+  pendingIntervention = null
+  resolve(answer)
+}
+
+// ============================================================
+// Agent Loop 核心
+// ============================================================
+async function runAgentLoop(initialUserMessage?: string) {
+  if (loopState === 'running') return
+  setLoopState('running')
+
+  const ctx = {
+    targetTabId,
+    taskName,
+    tabGroupId: taskTabGroupId,
+    sendMsg,
+  }
+
+  if (initialUserMessage) {
+    loopMessages.push({ role: 'user', content: initialUserMessage })
+    appendMessage('user', initialUserMessage)
+  }
+
+  const abortCtrl = new AbortController()
+  loopAbortController = abortCtrl
+
+  try {
+    while ((loopState as string) === 'running' && !abortCtrl.signal.aborted) {
+      const streaming = appendStreamingMessage('assistant')
+
+      const response = await chatWithTools(loopMessages, TOOL_DEFINITIONS, settings, (chunk) => {
+        streaming.append(chunk)
+      })
+
+      const assistantText = streaming.getText() || response.content
+
+      // 记录 assistant 消息到队列
+      if (settings.apiFormat === 'openai' && response.toolCalls.length > 0) {
+        loopMessages.push({
+          role: 'assistant',
+          content: assistantText,
+          tool_calls: response.toolCalls.map((tc) => ({
+            id: tc.id,
+            type: 'function',
+            function: { name: tc.name, arguments: JSON.stringify(tc.arguments) },
+          })),
+        })
+      } else {
+        loopMessages.push({ role: 'assistant', content: assistantText })
+      }
+
+      // 无 tool calls → 任务完成（或 AI 在等待）
+      if (response.toolCalls.length === 0) {
+        // 工作流：检查是否进入下一步
+        if (currentWorkflow && currentStepIndex < currentWorkflow.steps.length - 1) {
+          const prevStep = currentWorkflow.steps[currentStepIndex]
+          currentStepIndex++
+          updateWorkflowProgress()
+
+          if (prevStep.intervention !== 'none') {
+            setLoopState('paused')
+            const nextStep = currentWorkflow.steps[currentStepIndex]
+            appendMessage('assistant', `✅ 步骤完成！\n\n下一步：**${nextStep.name}**\n点击「▶ 继续」开始执行。`)
+            break
+          } else {
+            // 自动进入下一步
+            const nextStep = currentWorkflow.steps[currentStepIndex]
+            const newSystemPrompt = buildStepSystemPrompt(nextStep, currentWorkflow, currentStepIndex)
+            loopMessages = [
+              { role: 'system', content: newSystemPrompt },
+              { role: 'user', content: `请执行：${nextStep.name}` },
+            ]
+            appendMessage('assistant', `🔄 自动进入下一步：**${nextStep.name}**`)
+            continue
+          }
+        }
+        setLoopState('completed')
+        break
+      }
+
+      // 执行 tool calls
+      for (const toolCall of response.toolCalls) {
+        if (abortCtrl.signal.aborted || (loopState as string) !== 'running') break
+
+        appendMessage('system', `🔧 ${toolCall.name}(${formatToolArgs(toolCall.arguments)})`, { isLog: true })
+
+        const result = await executeTool(toolCall.name, toolCall.arguments, ctx)
+
+        if (result.interventionRequest) {
+          setLoopState('waiting_user')
+          const answer = await showIntervention(result.interventionRequest)
+          setLoopState('running')
+          appendMessage('user', answer)
+          pushToolResult(toolCall, answer)
+        } else {
+          const resultText = formatToolResult(result)
+          appendMessage('system', resultText.slice(0, 300), { isLog: true, isError: !result.success })
+          if (result.screenshotDataUrl) {
+            appendMessage('assistant', '📸 截图', { imageDataUrl: result.screenshotDataUrl })
+          }
+          pushToolResult(toolCall, resultText)
+        }
+      }
+    }
+  } catch (e) {
+    if (!abortCtrl.signal.aborted) {
+      appendMessage('assistant', `❌ 错误: ${e instanceof Error ? e.message : String(e)}`)
+      setLoopState('error')
+    }
+  }
+}
+
+function pushToolResult(toolCall: ToolCallRequest, content: string) {
+  if (settings.apiFormat === 'anthropic') {
+    loopMessages.push({
+      role: 'user',
+      content: [{ type: 'tool_result', tool_use_id: toolCall.id, content }],
+    })
+  } else {
+    loopMessages.push({ role: 'tool', tool_call_id: toolCall.id, name: toolCall.name, content })
+  }
+}
+
+function formatToolArgs(args: Record<string, unknown>): string {
+  return Object.entries(args).slice(0, 3)
+    .map(([k, v]) => `${k}=${JSON.stringify(v).slice(0, 30)}`).join(', ')
+}
+
+// ============================================================
+// 工作流
+// ============================================================
+function renderWorkflowList() {
+  const list = el('workflowList')
+  list.innerHTML = ''
+  settings.workflows.forEach((wf) => {
+    const card = document.createElement('div')
+    card.className = 'workflow-card'
+    card.innerHTML = `
+      <div class="wf-header">
+        <span class="wf-name">${escHtml(wf.name)}</span>
+        <span class="wf-steps">${wf.steps.length} 步</span>
+      </div>
+      <p class="wf-desc">${escHtml(wf.description)}</p>
+      ${wf.startUrl ? `<p class="wf-url">🔗 ${escHtml(wf.startUrl)}</p>` : ''}
+      <button class="btn-primary btn-run-wf" data-id="${wf.id}">▶ 开始执行</button>
+    `
+    list.appendChild(card)
+  })
+
+  list.querySelectorAll<HTMLButtonElement>('.btn-run-wf').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const wf = settings.workflows.find((w) => w.id === btn.dataset.id)
+      if (wf) startWorkflow(wf)
+    })
+  })
+}
+
+async function startWorkflow(wf: Workflow) {
+  currentWorkflow = wf
+  currentStepIndex = 0
+  taskName = wf.name
+  loopMessages = []
+
+  switchTab('chat')
+  updateWorkflowProgress()
+
+  appendMessage('assistant', `🚀 开始工作流：**${wf.name}**\n共 ${wf.steps.length} 步`)
+
+  const firstStep = wf.steps[0]
+  loopMessages = [
+    { role: 'system', content: buildStepSystemPrompt(firstStep, wf, 0) },
+    { role: 'user', content: `请开始执行第一步：${firstStep.name}${wf.startUrl ? `\n目标页面：${wf.startUrl}` : ''}` },
+  ]
+
+  await runAgentLoop()
+}
+
+function updateWorkflowProgress() {
+  const el2 = el('workflowProgress')
+  if (!currentWorkflow || !el2) return
+  const total = currentWorkflow.steps.length
+  const cur = currentStepIndex + 1
+  el2.style.display = 'block'
+  el2.innerHTML = `
+    <div class="progress-info">步骤 ${cur}/${total}：${escHtml(currentWorkflow.steps[currentStepIndex]?.name ?? '')}</div>
+    <div class="progress-track"><div class="progress-fill" style="width:${(cur / total * 100).toFixed(0)}%"></div></div>
+  `
+}
+
+// ============================================================
+// 标签切换
+// ============================================================
+function switchTab(tab: 'chat' | 'workflow' | 'settings-tab') {
+  document.querySelectorAll<HTMLElement>('.tab-btn').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.tab === tab)
+  })
+  document.querySelectorAll<HTMLElement>('.tab-panel').forEach((panel) => {
+    panel.style.display = panel.dataset.tab === tab ? 'flex' : 'none'
+  })
+}
+
+// ============================================================
+// 标签页选择器
+// ============================================================
+async function refreshTabSelector() {
+  const tabs = await getAllTabs(sendMsg)
+  const select = el<HTMLSelectElement>('tabSelector')
+  select.innerHTML = '<option value="">自动（当前活跃页）</option>'
+  tabs.forEach((tab) => {
+    const opt = document.createElement('option')
+    opt.value = String(tab.id)
+    opt.textContent = (tab.title ?? tab.url ?? '未知页面').slice(0, 45)
+    select.appendChild(opt)
+  })
+  if (targetTabId) select.value = String(targetTabId)
+}
+
+// ============================================================
+// 初始化
+// ============================================================
+async function init() {
+  settings = await loadSettings()
+
+  // 标签切换
+  document.querySelectorAll<HTMLElement>('.tab-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const tab = btn.dataset.tab as 'chat' | 'workflow' | 'settings-tab'
+      switchTab(tab)
+      if (tab === 'workflow') renderWorkflowList()
+    })
+  })
+
+  // 初始加载 tab 选择器
+  await refreshTabSelector()
+
+  el('tabSelector').addEventListener('change', (e) => {
+    const val = (e.target as HTMLSelectElement).value
+    targetTabId = val ? parseInt(val) : undefined
+  })
+
+  el('refreshTabsBtn').addEventListener('click', refreshTabSelector)
+
+  // Loop 控制
+  el('btnStart').addEventListener('click', async () => {
+    if (loopState === 'paused' && currentWorkflow) {
+      const nextStep = currentWorkflow.steps[currentStepIndex]
+      loopMessages = [
+        { role: 'system', content: buildStepSystemPrompt(nextStep, currentWorkflow, currentStepIndex) },
+        { role: 'user', content: `请继续执行：${nextStep.name}` },
+      ]
+      await runAgentLoop()
+    } else if (loopState === 'paused') {
+      await runAgentLoop()
+    } else {
+      const input = el<HTMLTextAreaElement>('userInput')
+      const text = input.value.trim()
+      if (!text) return
+      input.value = ''
+      loopMessages = [{ role: 'system', content: settings.systemPrompt }]
+      taskName = text.slice(0, 30)
+      await runAgentLoop(text)
+    }
+  })
+
+  el('btnPause').addEventListener('click', () => {
+    if (loopState === 'running') setLoopState('paused')
+  })
+
+  el('btnStop').addEventListener('click', () => {
+    loopAbortController?.abort()
+    loopMessages = []
+    currentWorkflow = null
+    currentStepIndex = 0
+    el('workflowProgress').style.display = 'none'
+    setLoopState('idle')
+    appendMessage('assistant', '⏹ 任务已停止')
+  })
+
+  // 普通发送
+  el('sendBtn').addEventListener('click', handleSend)
+  el<HTMLTextAreaElement>('userInput').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() }
+  })
+
+  // 用户介入面板
+  el('interventionSubmit').addEventListener('click', () => {
+    const answer = el<HTMLInputElement>('interventionInput').value.trim()
+    if (answer) resolveIntervention(answer)
+  })
+  el<HTMLInputElement>('interventionInput').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      const answer = (e.target as HTMLInputElement).value.trim()
+      if (answer) resolveIntervention(answer)
+    }
+  })
+
+  // 创建标签分组
+  el('createGroupBtn')?.addEventListener('click', async () => {
+    const select = el<HTMLSelectElement>('tabSelector')
+    const tabId = select.value ? parseInt(select.value) : undefined
+    if (!tabId) { appendMessage('assistant', '请先选择一个标签页'); return }
+    const groupId = await createTaskTabGroup(sendMsg, [tabId], taskName)
+    if (groupId !== null) {
+      taskTabGroupId = groupId
+      appendMessage('system', `✓ 已创建任务标签组 (id=${groupId})`, { isLog: true })
+    }
+  })
+
+  // 设置页按钮
+  el('settingsBtn').addEventListener('click', () => {
+    chrome.runtime.sendMessage({ type: 'OPEN_SETTINGS' })
+  })
+
+  // 设置更新监听
+  chrome.runtime.onMessage.addListener((msg) => {
+    if (msg.type === 'SETTINGS_UPDATED') {
+      loadSettings().then((s) => {
+        settings = s
+        renderWorkflowList()
+      })
+    }
+  })
+
+  setLoopState('idle')
+}
+
+async function handleSend() {
+  const input = el<HTMLTextAreaElement>('userInput')
+  const text = input.value.trim()
+  if (!text || loopState === 'running' || loopState === 'waiting_user') return
+  input.value = ''
+
+  if (loopState === 'idle' || loopState === 'completed' || loopState === 'error') {
+    loopMessages = [{ role: 'system', content: settings.systemPrompt }]
+    taskName = text.slice(0, 30)
+    await runAgentLoop(text)
+  } else if (loopState === 'paused') {
+    appendMessage('user', text)
+    loopMessages.push({ role: 'user', content: text })
+    await runAgentLoop()
+  }
+}
+
+document.addEventListener('DOMContentLoaded', init)

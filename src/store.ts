@@ -2,23 +2,29 @@
 // store.ts — chrome.storage 封装，统一读写设置
 // ============================================================
 import type { Settings } from './types'
+import { createDefaultWorkflows } from './workflow'
 
 export const DEFAULT_SETTINGS: Settings = {
   baseUrl: 'https://api.openai.com/v1',
   apiKey: '',
   apiFormat: 'openai',
   model: 'gpt-4o-mini',
-  systemPrompt: `你是一个浏览器操作助手。你可以帮助用户：
-1. 理解当前网页内容
-2. 执行页面操作（点击、填表、导航）
-3. 分析截图
-4. 完成复杂的多步骤任务
+  systemPrompt: `你是一个浏览器自动化助手，通过工具调用来完成网页操作任务。
 
-操作时注意：
-- 每次操作前先确认当前页面状态
-- 不确定时先询问用户
-- 遇到验证码或登录页时暂停并提示用户手动处理
-- 敏感操作（支付、删除等）前必须获得用户确认`,
+你拥有的工具能力：
+- 读取页面内容（get_page_content）
+- 点击元素、填写表单（click_element/fill_input）
+- 页面导航、滚动（navigate_to/scroll_page）
+- 截图分析（take_screenshot）
+- 数据下载到本地（download_data）
+- 向用户提问（ask_user）
+
+操作原则：
+1. 每次操作前先调用 get_page_content 了解页面状态
+2. 遇到验证码、登录或付款页面，使用 ask_user 提示用户手动处理
+3. 敏感操作（发消息、提交表单）前使用 ask_user 让用户确认
+4. 数据提取完成后，使用 download_data 保存到本地
+5. 完全模拟真实用户行为，操作间有合理延迟`,
   actionDelay: [800, 2500],
   maxActionsPerMinute: 12,
   prompts: [
@@ -31,13 +37,13 @@ export const DEFAULT_SETTINGS: Settings = {
     {
       id: 'p2',
       title: '提取数据',
-      content: '请提取当前页面所有关键数据，以结构化的方式展示',
+      content: '请提取当前页面所有关键数据，以结构化方式保存到本地文件',
       createdAt: Date.now(),
     },
     {
       id: 'p3',
       title: '填写表单',
-      content: '请帮我识别当前页面的表单字段，并告诉我需要填写哪些内容',
+      content: '请帮我识别当前页面的表单字段，询问我需要填写的内容后自动填写',
       createdAt: Date.now(),
     },
   ],
@@ -70,13 +76,17 @@ export const DEFAULT_SETTINGS: Settings = {
       createdAt: Date.now(),
     },
   ],
+  workflows: createDefaultWorkflows(),
 }
 
 export async function loadSettings(): Promise<Settings> {
   return new Promise((resolve) => {
     chrome.storage.local.get('settings', (result) => {
       const saved = result.settings as Partial<Settings> | undefined
-      resolve({ ...DEFAULT_SETTINGS, ...saved })
+      const merged = { ...DEFAULT_SETTINGS, ...saved }
+      // 确保 workflows 字段存在（升级兼容）
+      if (!merged.workflows?.length) merged.workflows = createDefaultWorkflows()
+      resolve(merged)
     })
   })
 }

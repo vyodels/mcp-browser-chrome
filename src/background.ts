@@ -1,6 +1,6 @@
 // ============================================================
 // background.ts — Service Worker
-// 负责：侧边栏开启、tab 消息中转、截图
+// 负责：侧边栏开启、tab 消息中转、截图、标签组管理、文件下载
 // ============================================================
 
 // 开启侧边栏
@@ -13,7 +13,7 @@ chrome.runtime.onInstalled.addListener(() => {
   chrome.sidePanel.setOptions({ enabled: true })
 })
 
-// 解析目标 tab：若传了 targetTabId 则用那个 tab，否则取当前激活 tab
+// 解析目标 tab
 function resolveTab(targetTabId?: number): Promise<chrome.tabs.Tab | null> {
   if (targetTabId) {
     return chrome.tabs.get(targetTabId).catch(() => null)
@@ -35,6 +35,21 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         sendResponse({
           success: true,
           tab: { id: tab.id, url: tab.url ?? '', title: tab.title ?? '', favIconUrl: tab.favIconUrl },
+        })
+      })
+      return true
+
+    case 'GET_ALL_TABS':
+      chrome.tabs.query({ currentWindow: true }, (tabs) => {
+        sendResponse({
+          success: true,
+          tabs: tabs.map((t) => ({
+            id: t.id,
+            url: t.url ?? '',
+            title: t.title ?? '',
+            favIconUrl: t.favIconUrl,
+            groupId: t.groupId,
+          })),
         })
       })
       return true
@@ -85,6 +100,81 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         )
       })
       return true
+
+    case 'OPEN_TAB': {
+      const { url, groupId } = message.payload as { url?: string; groupId?: number }
+      chrome.tabs.create({ url: url || 'about:blank', active: false }, (tab) => {
+        if (chrome.runtime.lastError || !tab.id) {
+          sendResponse({ success: false, error: chrome.runtime.lastError?.message })
+          return
+        }
+        if (groupId !== undefined && groupId >= 0) {
+          chrome.tabs.group({ tabIds: tab.id, groupId }, () => {
+            sendResponse({ success: true, tabId: tab.id })
+          })
+        } else {
+          sendResponse({ success: true, tabId: tab.id })
+        }
+      })
+      return true
+    }
+
+    case 'CREATE_TAB_GROUP': {
+      const { tabIds, title, color } = message.payload as {
+        tabIds: number[]
+        title: string
+        color?: chrome.tabGroups.ColorEnum
+      }
+      chrome.tabs.group({ tabIds }, (groupId) => {
+        if (chrome.runtime.lastError) {
+          sendResponse({ success: false, error: chrome.runtime.lastError.message })
+          return
+        }
+        chrome.tabGroups.update(groupId, { title, color: color ?? 'blue' }, () => {
+          sendResponse({ success: true, groupId })
+        })
+      })
+      return true
+    }
+
+    case 'CLOSE_TAB_GROUP': {
+      const { groupId: gid } = message.payload as { groupId: number }
+      chrome.tabs.query({ groupId: gid }, (tabs) => {
+        const ids = tabs.map((t) => t.id!).filter(Boolean)
+        if (ids.length) {
+          chrome.tabs.remove(ids, () => sendResponse({ success: true }))
+        } else {
+          sendResponse({ success: true })
+        }
+      })
+      return true
+    }
+
+    case 'DOWNLOAD_DATA': {
+      const { filename, content, format } = message.payload as {
+        filename: string
+        content: string
+        format: string
+      }
+      const mimeTypes: Record<string, string> = {
+        json: 'application/json',
+        csv: 'text/csv',
+        txt: 'text/plain',
+      }
+      const mime = mimeTypes[format] ?? 'text/plain'
+      const dataUrl = `data:${mime};charset=utf-8,${encodeURIComponent(content)}`
+      chrome.downloads.download(
+        { url: dataUrl, filename, saveAs: false, conflictAction: 'uniquify' },
+        (downloadId) => {
+          if (chrome.runtime.lastError) {
+            sendResponse({ success: false, error: chrome.runtime.lastError.message })
+          } else {
+            sendResponse({ success: true, downloadId })
+          }
+        }
+      )
+      return true
+    }
   }
   return false
 })

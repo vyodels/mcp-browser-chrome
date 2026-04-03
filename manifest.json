@@ -9,7 +9,9 @@
     "scripting",
     "storage",
     "sidePanel",
-    "desktopCapture"
+    "desktopCapture",
+    "tabGroups",
+    "downloads"
   ],
   "host_permissions": ["<all_urls>"],
   "background": {
