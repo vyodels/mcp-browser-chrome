@@ -36,6 +36,7 @@ export interface Settings {
   prompts: SavedPrompt[]
   skills: Skill[]
   workflows: Workflow[]
+  activityLog: ActivityEntry[]
 }
 
 export interface SavedPrompt {
@@ -173,6 +174,18 @@ export interface ToolCallResponse {
 
 // Agent Loop 状态
 export type LoopState = 'idle' | 'running' | 'paused' | 'waiting_user' | 'completed' | 'error'
+
+// 活动记录
+export type ActivityType = 'download' | 'navigate' | 'candidate' | 'note'
+
+export interface ActivityEntry {
+  id: string
+  timestamp: number
+  type: ActivityType
+  title: string
+  detail?: string
+  taskName?: string
+}
 
 // 用户介入请求（ask_user 工具触发）
 export interface InterventionRequest {

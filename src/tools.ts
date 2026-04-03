@@ -3,7 +3,7 @@
 // LLM 通过 function/tool calling API 调用这些工具
 // 工具定义在本地，LLM 调用通过远程 OpenAI/Anthropic API
 // ============================================================
-import type { PageSnapshot, AgentAction, InterventionRequest } from './types'
+import type { PageSnapshot, AgentAction, InterventionRequest, ActivityEntry } from './types'
 
 // Re-export for use by openai.ts and sidepanel.ts
 export type { ToolCallRequest } from './types'
@@ -207,6 +207,8 @@ export interface ToolExecuteContext {
   sendMsg: (msg: object) => Promise<unknown>
   // ask_user 工具的 resolve（由 loop 外部注入）
   resolveIntervention?: (answer: string) => void
+  // 活动记录写入（由 loop 外部注入）
+  logActivity?: (entry: Omit<ActivityEntry, 'id' | 'timestamp'>) => void
 }
 
 // ---- 工具执行结果 ----
@@ -317,7 +319,9 @@ async function toolNavigateTo(args: { url: string }, ctx: ToolExecuteContext): P
 
   // 再等一小会确保 content script 注入完成
   await new Promise((r) => setTimeout(r, 800))
-  return await toolGetPageContent(ctx)
+  const result = await toolGetPageContent(ctx)
+  ctx.logActivity?.({ type: 'navigate', title: args.url, taskName: ctx.taskName })
+  return result
 }
 
 async function toolScrollPage(args: { direction: string; pixels?: string }, ctx: ToolExecuteContext): Promise<ToolResult> {
@@ -374,6 +378,12 @@ async function toolDownloadData(
     },
   }) as { success: boolean; error?: string }
   if (!resp.success) return { success: false, error: resp.error ?? '下载失败' }
+  ctx.logActivity?.({
+    type: 'download',
+    title: args.filename,
+    detail: `~/Downloads/browser-agent-files/${taskDir}/`,
+    taskName: ctx.taskName,
+  })
   return { success: true, data: `文件已保存: ~/Downloads/browser-agent-files/${taskDir}/${args.filename}` }
 }
 
