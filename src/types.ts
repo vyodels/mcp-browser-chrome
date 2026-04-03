@@ -13,12 +13,14 @@ export interface WorkflowStep {
   instructions: string       // 给 AI 的详细指令
   intervention: InterventionType
   completionHint: string     // AI 判断此步完成的依据
+  skillIds?: string[]        // 引用的 Skill ID，其 instructions 会注入本步骤
 }
 
 export interface Workflow {
   id: string
   name: string
   description: string
+  context?: string           // 全局背景/要求（如候选人标准），注入每一步 system prompt
   startUrl?: string
   steps: WorkflowStep[]
   createdAt: number
@@ -37,6 +39,7 @@ export interface Settings {
   skills: Skill[]
   workflows: Workflow[]
   activityLog: ActivityEntry[]
+  candidates: CandidateEntry[]
 }
 
 export interface SavedPrompt {
@@ -185,6 +188,35 @@ export interface ActivityEntry {
   title: string
   detail?: string
   taskName?: string
+}
+
+// 候选人追踪
+export type CandidateStatus =
+  | 'screening'           // 筛选中
+  | 'contacted'           // 已发起沟通
+  | 'resume_received'     // 已收到简历
+  | 'interview_scheduled' // 已预约面试
+  | 'passed'              // 通过
+  | 'rejected'            // 淘汰
+
+export interface CandidateEntry {
+  id: string
+  name: string
+  status: CandidateStatus
+  position?: string       // 应聘/当前职位
+  company?: string        // 当前公司
+  experience?: string     // 工作年限
+  education?: string      // 学历
+  salary?: string         // 期望薪资
+  phone?: string
+  notes?: string          // 备注：沟通情况、匹配分析
+  resumeFile?: string     // 简历文件名
+  interviewTime?: string  // 面试时间
+  tags?: string[]
+  workflowId?: string
+  taskName?: string
+  createdAt: number
+  updatedAt: number
 }
 
 // 用户介入请求（ask_user 工具触发）

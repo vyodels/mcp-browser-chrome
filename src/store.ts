@@ -78,6 +78,7 @@ export const DEFAULT_SETTINGS: Settings = {
   ],
   workflows: createDefaultWorkflows(),
   activityLog: [],
+  candidates: [],
 }
 
 export async function loadSettings(): Promise<Settings> {
@@ -89,6 +90,7 @@ export async function loadSettings(): Promise<Settings> {
       if (!merged.workflows?.length) merged.workflows = createDefaultWorkflows()
       // 确保 activityLog 字段存在（升级兼容）
       if (!merged.activityLog) merged.activityLog = []
+      if (!merged.candidates) merged.candidates = []
       resolve(merged)
     })
   })

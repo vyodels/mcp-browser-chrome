@@ -3,7 +3,7 @@
 // LLM 通过 function/tool calling API 调用这些工具
 // 工具定义在本地，LLM 调用通过远程 OpenAI/Anthropic API
 // ============================================================
-import type { PageSnapshot, AgentAction, InterventionRequest, ActivityEntry } from './types'
+import type { PageSnapshot, AgentAction, InterventionRequest, ActivityEntry, CandidateEntry, CandidateStatus } from './types'
 
 // Re-export for use by openai.ts and sidepanel.ts
 export type { ToolCallRequest } from './types'
@@ -195,6 +195,38 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
       required: ['question'],
     },
   },
+  {
+    name: 'log_candidate',
+    description: '记录或更新候选人信息到候选人追踪系统。招聘工作流中每处理一个候选人都应调用此工具，无论结果如何。支持创建新记录和更新已有记录（传入相同 id 即更新）。',
+    parameters: {
+      type: 'object',
+      properties: {
+        id: {
+          type: 'string',
+          description: '候选人唯一标识。更新已有记录时传入之前返回的 id；新候选人留空，系统自动生成。',
+        },
+        name: {
+          type: 'string',
+          description: '候选人真实姓名',
+        },
+        status: {
+          type: 'string',
+          description: '当前状态：screening=筛选中, contacted=已沟通, resume_received=已收简历, interview_scheduled=已预约面试, passed=通过, rejected=淘汰',
+          enum: ['screening', 'contacted', 'resume_received', 'interview_scheduled', 'passed', 'rejected'],
+        },
+        position: { type: 'string', description: '当前职位或应聘职位' },
+        company: { type: 'string', description: '当前所在公司' },
+        experience: { type: 'string', description: '工作年限，如"5年"' },
+        education: { type: 'string', description: '最高学历，如"本科/985"' },
+        salary: { type: 'string', description: '期望薪资，如"25-30k"' },
+        notes: { type: 'string', description: '备注：沟通情况、匹配评分、特殊说明等。追加写入时请包含前次内容。' },
+        resumeFile: { type: 'string', description: '简历文件名（已下载到本地的文件名）' },
+        interviewTime: { type: 'string', description: '已确认的面试时间，如"2024-04-10 周三 14:00"' },
+        tags: { type: 'string', description: '标签，逗号分隔，如"强推,React专家,需背调"' },
+      },
+      required: ['name', 'status'],
+    },
+  },
 ]
 
 // ---- 工具执行上下文 ----
@@ -209,6 +241,8 @@ export interface ToolExecuteContext {
   resolveIntervention?: (answer: string) => void
   // 活动记录写入（由 loop 外部注入）
   logActivity?: (entry: Omit<ActivityEntry, 'id' | 'timestamp'>) => void
+  // 候选人记录写入/更新（由 loop 外部注入）
+  logCandidate?: (entry: Partial<CandidateEntry> & { name: string; status: CandidateStatus }) => Promise<string>
 }
 
 // ---- 工具执行结果 ----
@@ -254,6 +288,8 @@ export async function executeTool(
         return await toolOpenNewTab(args as { url?: string }, ctx)
       case 'ask_user':
         return toolAskUser(args as { question: string; options?: string; placeholder?: string })
+      case 'log_candidate':
+        return await toolLogCandidate(args as unknown as CandidateArgs, ctx)
       default:
         return { success: false, error: `未知工具: ${name}` }
     }
@@ -407,6 +443,49 @@ function toolAskUser(args: { question: string; options?: string; placeholder?: s
       options,
       placeholder: args.placeholder,
     },
+  }
+}
+
+interface CandidateArgs {
+  id?: string
+  name: string
+  status: CandidateStatus
+  position?: string
+  company?: string
+  experience?: string
+  education?: string
+  salary?: string
+  notes?: string
+  resumeFile?: string
+  interviewTime?: string
+  tags?: string
+  workflowId?: string
+}
+
+async function toolLogCandidate(args: CandidateArgs, ctx: ToolExecuteContext): Promise<ToolResult> {
+  if (!ctx.logCandidate) {
+    return { success: false, error: '候选人记录功能未初始化' }
+  }
+  const tagList = args.tags ? args.tags.split(',').map((t) => t.trim()).filter(Boolean) : undefined
+  const newId = await ctx.logCandidate({
+    ...(args.id ? { id: args.id } : {}),
+    name: args.name,
+    status: args.status,
+    position: args.position,
+    company: args.company,
+    experience: args.experience,
+    education: args.education,
+    salary: args.salary,
+    notes: args.notes,
+    resumeFile: args.resumeFile,
+    interviewTime: args.interviewTime,
+    tags: tagList,
+    workflowId: args.workflowId,
+    taskName: ctx.taskName,
+  })
+  return {
+    success: true,
+    data: `候选人记录已${args.id ? '更新' : '创建'}：${args.name} [${args.status}]，id=${newId}`,
   }
 }
 

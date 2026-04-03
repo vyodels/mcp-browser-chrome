@@ -7,7 +7,7 @@ import { chatWithTools } from './openai'
 import { TOOL_DEFINITIONS, executeTool, formatToolResult } from './tools'
 import { createTaskTabGroup, getAllTabs } from './tabManager'
 import { buildStepSystemPrompt } from './workflow'
-import type { Settings, LoopState, InterventionRequest, Workflow, ActivityEntry, ActivityType } from './types'
+import type { Settings, LoopState, InterventionRequest, Workflow, ActivityEntry, ActivityType, CandidateEntry, CandidateStatus } from './types'
 import type { ToolCallRequest } from './tools'
 
 // ============================================================
@@ -24,6 +24,7 @@ let currentWorkflow: Workflow | null = null
 let currentStepIndex = 0
 let pendingIntervention: ((answer: string) => void) | null = null
 let currentLogFilter: ActivityType | 'all' = 'all'
+let currentCandFilter: CandidateStatus | 'all' = 'all'
 
 // ============================================================
 // 消息封装
@@ -222,6 +223,89 @@ function renderActivityLog(filter: ActivityType | 'all' = 'all') {
 }
 
 // ============================================================
+// 候选人追踪
+// ============================================================
+const CANDIDATE_STATUS_LABELS: Record<CandidateStatus, string> = {
+  screening: '筛选中',
+  contacted: '已沟通',
+  resume_received: '已收简历',
+  interview_scheduled: '待面试',
+  passed: '✅ 通过',
+  rejected: '❌ 淘汰',
+}
+
+const CANDIDATE_STATUS_COLORS: Record<CandidateStatus, string> = {
+  screening: '#aeaeb2',
+  contacted: '#007aff',
+  resume_received: '#5856d6',
+  interview_scheduled: '#ff9f0a',
+  passed: '#30d158',
+  rejected: '#ff3b30',
+}
+
+async function upsertCandidate(
+  entry: Partial<CandidateEntry> & { name: string; status: CandidateStatus }
+): Promise<string> {
+  const s = await loadSettings()
+  const candidates = s.candidates ?? []
+  const now = Date.now()
+  const id = entry.id && candidates.find((c) => c.id === entry.id)
+    ? entry.id
+    : entry.id ?? `cand-${now}-${Math.random().toString(36).slice(2, 6)}`
+
+  const existing = candidates.find((c) => c.id === id)
+  const updated: CandidateEntry = {
+    ...(existing ?? { createdAt: now }),
+    ...entry,
+    id,
+    updatedAt: now,
+    createdAt: existing?.createdAt ?? now,
+  }
+
+  const newList = existing
+    ? candidates.map((c) => c.id === id ? updated : c)
+    : [updated, ...candidates]
+
+  await saveSettings({ candidates: newList })
+  return id
+}
+
+function renderCandidates(filterStatus: CandidateStatus | 'all' = 'all') {
+  loadSettings().then((s) => {
+    const container = el('candidateList')
+    if (!container) return
+    const list = filterStatus === 'all'
+      ? (s.candidates ?? [])
+      : (s.candidates ?? []).filter((c) => c.status === filterStatus)
+
+    if (list.length === 0) {
+      container.innerHTML = '<div class="log-empty">暂无候选人记录</div>'
+      return
+    }
+
+    container.innerHTML = list.map((c) => {
+      const color = CANDIDATE_STATUS_COLORS[c.status] ?? '#aeaeb2'
+      const label = CANDIDATE_STATUS_LABELS[c.status] ?? c.status
+      const time = new Date(c.updatedAt).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' })
+      const tags = c.tags?.length ? c.tags.map((t) => `<span class="cand-tag">${escHtml(t)}</span>`).join('') : ''
+      return `<div class="cand-card">
+        <div class="cand-header">
+          <span class="cand-name">${escHtml(c.name)}</span>
+          <span class="cand-status" style="color:${color};border-color:${color}">${label}</span>
+          <span class="cand-time">${time}</span>
+        </div>
+        ${c.position || c.company ? `<div class="cand-meta">${escHtml([c.position, c.company].filter(Boolean).join(' @ '))}</div>` : ''}
+        ${c.experience || c.education || c.salary ? `<div class="cand-meta cand-meta-secondary">${escHtml([c.experience, c.education, c.salary].filter(Boolean).join('  ·  '))}</div>` : ''}
+        ${c.notes ? `<div class="cand-notes">${escHtml(c.notes.slice(0, 200))}</div>` : ''}
+        ${c.interviewTime ? `<div class="cand-meta" style="color:var(--accent-orange)">📅 ${escHtml(c.interviewTime)}</div>` : ''}
+        ${c.resumeFile ? `<div class="cand-meta" style="color:var(--accent-green)">📎 ${escHtml(c.resumeFile)}</div>` : ''}
+        ${tags ? `<div class="cand-tags">${tags}</div>` : ''}
+      </div>`
+    }).join('')
+  })
+}
+
+// ============================================================
 // Agent Loop 核心
 // ============================================================
 async function runAgentLoop(initialUserMessage?: string) {
@@ -234,6 +318,7 @@ async function runAgentLoop(initialUserMessage?: string) {
     tabGroupId: taskTabGroupId,
     sendMsg,
     logActivity: addActivityEntry,
+    logCandidate: upsertCandidate,
   }
 
   if (initialUserMessage) {
@@ -285,7 +370,7 @@ async function runAgentLoop(initialUserMessage?: string) {
           } else {
             // 自动进入下一步
             const nextStep = currentWorkflow.steps[currentStepIndex]
-            const newSystemPrompt = buildStepSystemPrompt(nextStep, currentWorkflow, currentStepIndex)
+            const newSystemPrompt = buildStepSystemPrompt(nextStep, currentWorkflow, currentStepIndex, settings.skills)
             loopMessages = [
               { role: 'system', content: newSystemPrompt },
               { role: 'user', content: `请执行：${nextStep.name}` },
@@ -451,7 +536,7 @@ async function startWorkflow(wf: Workflow) {
 
   const firstStep = wf.steps[0]
   loopMessages = [
-    { role: 'system', content: buildStepSystemPrompt(firstStep, wf, 0) },
+    { role: 'system', content: buildStepSystemPrompt(firstStep, wf, 0, settings.skills) },
     { role: 'user', content: `请开始执行第一步：${firstStep.name}` },
   ]
 
@@ -481,6 +566,7 @@ function switchTab(tab: string) {
     panel.style.display = panel.dataset.tab === tab ? 'flex' : 'none'
   })
   if (tab === 'log') renderActivityLog(currentLogFilter)
+  if (tab === 'candidates') renderCandidates(currentCandFilter)
 }
 
 // ============================================================
@@ -524,6 +610,16 @@ async function init() {
     })
   })
 
+  // 候选人过滤
+  document.querySelectorAll<HTMLButtonElement>('[data-cand-filter]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll<HTMLButtonElement>('[data-cand-filter]').forEach((b) => b.classList.remove('active'))
+      btn.classList.add('active')
+      currentCandFilter = (btn.dataset.candFilter ?? 'all') as CandidateStatus | 'all'
+      renderCandidates(currentCandFilter)
+    })
+  })
+
   el('clearLogBtn')?.addEventListener('click', async () => {
     await saveSettings({ activityLog: [] })
     renderActivityLog(currentLogFilter)
@@ -544,7 +640,7 @@ async function init() {
     if (loopState === 'paused' && currentWorkflow) {
       const nextStep = currentWorkflow.steps[currentStepIndex]
       loopMessages = [
-        { role: 'system', content: buildStepSystemPrompt(nextStep, currentWorkflow, currentStepIndex) },
+        { role: 'system', content: buildStepSystemPrompt(nextStep, currentWorkflow, currentStepIndex, settings.skills) },
         { role: 'user', content: `请继续执行：${nextStep.name}` },
       ]
       await runAgentLoop()

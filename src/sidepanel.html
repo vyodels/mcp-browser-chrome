@@ -387,6 +387,38 @@
     .wf-step-name { font-size: 12px; font-weight: 500; }
     .wf-step-intervention { font-size: 11px; color: var(--text2); margin-top: 2px; }
 
+    /* ---- 候选人卡片 ---- */
+    .cand-panel { flex: 1; overflow-y: auto; display: flex; flex-direction: column; min-height: 0; }
+    .cand-toolbar {
+      display: flex; align-items: center; gap: 4px; flex-wrap: wrap;
+      padding: 8px 10px; border-bottom: 1px solid var(--border-light); flex-shrink: 0;
+    }
+    .cand-list { flex: 1; overflow-y: auto; padding: 8px 10px; display: flex; flex-direction: column; gap: 8px; }
+
+    .cand-card {
+      background: var(--bg-card); border: 1px solid var(--border-light);
+      border-radius: var(--radius); padding: 10px 12px; box-shadow: var(--shadow-sm);
+      display: flex; flex-direction: column; gap: 5px;
+    }
+    .cand-header { display: flex; align-items: center; gap: 6px; }
+    .cand-name { font-size: 13px; font-weight: 600; flex: 1; }
+    .cand-status {
+      font-size: 10px; padding: 2px 7px; border-radius: 8px;
+      border: 1px solid; font-weight: 500; flex-shrink: 0;
+    }
+    .cand-time { font-size: 10px; color: var(--text3); flex-shrink: 0; }
+    .cand-meta { font-size: 11px; color: var(--text2); }
+    .cand-meta-secondary { color: var(--text3); }
+    .cand-notes {
+      font-size: 11px; color: var(--text2); line-height: 1.5;
+      background: rgba(0,0,0,0.02); border-radius: 6px; padding: 5px 7px;
+    }
+    .cand-tags { display: flex; flex-wrap: wrap; gap: 4px; }
+    .cand-tag {
+      font-size: 10px; padding: 2px 6px; border-radius: 6px;
+      background: rgba(0,122,255,0.08); color: var(--accent);
+    }
+
     /* ---- 活动记录面板 ---- */
     .log-panel {
       flex: 1; overflow-y: auto;
@@ -477,6 +509,7 @@
   <button class="tab-btn active" data-tab="chat">💬 对话</button>
   <button class="tab-btn" data-tab="workflow">⚡ 工作流</button>
   <button class="tab-btn" data-tab="log">📋 记录</button>
+  <button class="tab-btn" data-tab="candidates">👤 候选人</button>
   <button class="tab-btn" data-tab="settings-tab">🔧 设置</button>
 </div>
 
@@ -546,6 +579,23 @@
     </div>
     <div class="log-list" id="activityLog">
       <div class="log-empty">暂无活动记录</div>
+    </div>
+  </div>
+</div>
+
+<!-- 候选人标签 -->
+<div class="tab-panel" data-tab="candidates">
+  <div class="cand-panel">
+    <div class="cand-toolbar">
+      <button class="filter-btn active" data-cand-filter="all">全部</button>
+      <button class="filter-btn" data-cand-filter="screening">筛选中</button>
+      <button class="filter-btn" data-cand-filter="contacted">已沟通</button>
+      <button class="filter-btn" data-cand-filter="resume_received">简历</button>
+      <button class="filter-btn" data-cand-filter="interview_scheduled">待面试</button>
+      <button class="filter-btn" data-cand-filter="passed">通过</button>
+    </div>
+    <div class="cand-list" id="candidateList">
+      <div class="log-empty">暂无候选人记录</div>
     </div>
   </div>
 </div>
