@@ -66,6 +66,7 @@ export interface Settings {
   activityLog: ActivityEntry[]
   candidates: CandidateEntry[]
   workspaceRecords: WorkspaceRecord[]
+  memoryEntries: MemoryEntry[]   // Layer 1 持久记忆
 }
 
 export interface SavedPrompt {
@@ -261,6 +262,18 @@ export interface SchemaProposal {
   workflowName: string
   field: WorkspaceField
   reason: string
+}
+
+// ---- 分层记忆系统 ----
+export type MemoryLayer = 'persistent' | 'session'
+
+export interface MemoryEntry {
+  key: string
+  value: string
+  layer: MemoryLayer
+  workflowId?: string   // 关联工作流（空=全局）
+  createdAt: number
+  updatedAt: number
 }
 
 // AI 生成的 Skill 待审批通知

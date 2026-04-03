@@ -7,7 +7,7 @@ import { chatWithTools } from './openai'
 import { TOOL_DEFINITIONS, executeTool, formatToolResult } from './tools'
 import { createTaskTabGroup, getAllTabs } from './tabManager'
 import { buildStepSystemPrompt } from './workflow'
-import type { Settings, LoopState, InterventionRequest, Workflow, ActivityEntry, CandidateEntry, CandidateStatus, WorkspaceRecord, WorkspaceField, SchemaProposal, Skill } from './types'
+import type { Settings, LoopState, InterventionRequest, Workflow, ActivityEntry, CandidateEntry, CandidateStatus, WorkspaceRecord, WorkspaceField, SchemaProposal, Skill, MemoryEntry } from './types'
 import type { ToolCallRequest } from './tools'
 
 // ============================================================
@@ -79,16 +79,82 @@ function formatContent(text: string): string {
 }
 
 // ============================================================
-// 会话记忆
+// 四层记忆系统
 // ============================================================
-function saveMemoryEntry(key: string, value: string) {
-  sessionMemory[key] = value
+
+// Layer 1: 持久记忆（chrome.storage，跨会话）
+async function loadPersistentMemory(workflowId?: string): Promise<MemoryEntry[]> {
+  const s = await loadSettings()
+  const all = s.memoryEntries ?? []
+  // 返回全局条目 + 当前工作流条目
+  return all.filter((e) => !e.workflowId || !workflowId || e.workflowId === workflowId)
 }
 
-function buildMemorySection(): string {
-  const entries = Object.entries(sessionMemory)
-  if (entries.length === 0) return ''
-  return `\n## 会话记忆（跨步骤重要信息）\n${entries.map(([k, v]) => `- **${k}**: ${v}`).join('\n')}\n`
+async function savePersistentMemoryEntry(key: string, value: string, workflowId?: string): Promise<void> {
+  const s = await loadSettings()
+  const entries = s.memoryEntries ?? []
+  const now = Date.now()
+  const idx = entries.findIndex((e) => e.key === key && e.workflowId === workflowId)
+  const entry: MemoryEntry = { key, value, layer: 'persistent', workflowId, createdAt: now, updatedAt: now }
+  if (idx >= 0) { entry.createdAt = entries[idx].createdAt; entries[idx] = entry }
+  else entries.push(entry)
+  await saveSettings({ memoryEntries: entries })
+}
+
+async function deletePersistentMemoryEntry(key: string, workflowId?: string): Promise<void> {
+  const s = await loadSettings()
+  const entries = (s.memoryEntries ?? []).filter(
+    (e) => !(e.key === key && e.workflowId === workflowId)
+  )
+  await saveSettings({ memoryEntries: entries })
+}
+
+// Layer 2: 会话记忆（内存，本次任务有效）
+async function saveMemoryEntry(key: string, value: string, layer: 'session' | 'persistent' = 'session'): Promise<void> {
+  if (layer === 'persistent') {
+    await savePersistentMemoryEntry(key, value, currentWorkflow?.id)
+    renderMemoryPanel()   // 刷新 UI
+  } else {
+    sessionMemory[key] = value
+  }
+}
+
+async function deleteMemoryEntry(key: string, layer: 'session' | 'persistent'): Promise<void> {
+  if (layer === 'persistent') {
+    await deletePersistentMemoryEntry(key, currentWorkflow?.id)
+    renderMemoryPanel()
+  } else {
+    delete sessionMemory[key]
+  }
+}
+
+function listMemorySnapshot(): { persistent: MemoryEntry[]; session: Record<string, string> } {
+  return {
+    persistent: _cachedPersistentMemory,
+    session: { ...sessionMemory },
+  }
+}
+
+// 缓存的持久记忆（在步骤开始时刷新）
+let _cachedPersistentMemory: MemoryEntry[] = []
+
+// 构建注入 system prompt 的记忆文本（Layer 1 + Layer 2）
+function buildMemorySection(persistentEntries: MemoryEntry[] = _cachedPersistentMemory): string {
+  const parts: string[] = []
+
+  if (persistentEntries.length > 0) {
+    parts.push('### 📚 持久记忆（跨会话，长期有效）')
+    parts.push(persistentEntries.map((e) => `- **${e.key}**: ${e.value}`).join('\n'))
+  }
+
+  const sessEntries = Object.entries(sessionMemory)
+  if (sessEntries.length > 0) {
+    parts.push('### 🧠 会话记忆（本次任务）')
+    parts.push(sessEntries.map(([k, v]) => `- **${k}**: ${v}`).join('\n'))
+  }
+
+  if (parts.length === 0) return ''
+  return `\n## 🗃 记忆上下文\n${parts.join('\n')}\n`
 }
 
 // ============================================================
@@ -376,7 +442,58 @@ function renderWorkspaceTab(workflow: Workflow) {
   if (sel) sel.value = workflow.id
   renderWorkspaceFilterBar(workflow)
   renderWorkspaceTabFiltered(workflow)
+  renderMemoryPanel()
   renderWorkspaceActivity()
+}
+
+// ============================================================
+// 记忆面板（工作区 tab 内）
+// ============================================================
+function renderMemoryPanel() {
+  const container = el('memoryPanel')
+  if (!container) return
+
+  loadSettings().then((s) => {
+    const wfId = workspaceActiveWfId ?? currentWorkflow?.id
+    const persistent = (s.memoryEntries ?? []).filter(
+      (e) => !e.workflowId || !wfId || e.workflowId === wfId
+    )
+    const sessionEntries = Object.entries(sessionMemory)
+    const total = persistent.length + sessionEntries.length
+
+    if (total === 0) {
+      container.innerHTML = '<div style="font-size:11px;color:var(--text3);padding:4px 0">暂无记忆。AI 执行时可通过 save_memory 工具写入。</div>'
+      return
+    }
+
+    const persHtml = persistent.map((e) => `
+      <div class="mem-row" data-key="${escHtml(e.key)}" data-layer="persistent">
+        <span class="mem-badge mem-badge--persistent">持久</span>
+        <span class="mem-key">${escHtml(e.key)}</span>
+        <span class="mem-value">${escHtml(e.value)}</span>
+        <button class="mem-del" title="删除">✕</button>
+      </div>`).join('')
+
+    const sessHtml = sessionEntries.map(([k, v]) => `
+      <div class="mem-row" data-key="${escHtml(k)}" data-layer="session">
+        <span class="mem-badge mem-badge--session">会话</span>
+        <span class="mem-key">${escHtml(k)}</span>
+        <span class="mem-value">${escHtml(v)}</span>
+        <button class="mem-del" title="删除">✕</button>
+      </div>`).join('')
+
+    container.innerHTML = persHtml + sessHtml
+
+    container.querySelectorAll<HTMLButtonElement>('.mem-del').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const row = btn.closest<HTMLElement>('.mem-row')!
+        const key = row.dataset.key!
+        const layer = row.dataset.layer as 'session' | 'persistent'
+        await deleteMemoryEntry(key, layer)
+        renderMemoryPanel()
+      })
+    })
+  })
 }
 
 function renderWorkspaceActivity() {
@@ -428,6 +545,8 @@ async function runAgentLoop(initialUserMessage?: string) {
     saveSkill: saveAiSkill,
     evolveSchema: addWorkspaceField,
     saveMemory: saveMemoryEntry,
+    listMemory: listMemorySnapshot,
+    deleteMemory: deleteMemoryEntry,
     runSubAgent: (task: string, context: string) => runSubAgentLoop(task, context, ctx),
   }
 
@@ -481,7 +600,8 @@ async function runAgentLoop(initialUserMessage?: string) {
             appendMessage('assistant', `✅ 步骤完成！\n\n下一步：**${nextStep.name}**\n点击「▶ 继续」开始执行。`)
             break
           } else {
-            // 自动进入下一步
+            // 自动进入下一步，刷新持久记忆缓存（AI 可能在上一步写了持久记忆）
+            _cachedPersistentMemory = await loadPersistentMemory(currentWorkflow.id)
             const nextStep = currentWorkflow.steps[currentStepIndex]
             const newSystemPrompt = buildStepSystemPrompt(nextStep, currentWorkflow, currentStepIndex, settings.skills)
               + buildMemorySection()
@@ -582,15 +702,26 @@ function renderWorkflowList() {
       <p class="wf-desc">${escHtml(wf.description)}</p>
       ${wf.startUrl ? `<p class="wf-url">🔗 ${escHtml(wf.startUrl)}</p>` : ''}
       <div class="wf-footer">
-        <button class="wf-toggle-btn">▸ 查看步骤</button>
+        <div style="display:flex;gap:6px">
+          <button class="wf-toggle-btn">▸ 步骤</button>
+          <button class="wf-ctx-btn">✏ 背景</button>
+        </div>
         <div style="display:flex;gap:6px">
           ${(wf.workspace?.fields.length ?? 0) > 0
             ? `<button class="btn-workspace" data-id="${wf.id}" style="height:30px;padding:0 10px;border:1px solid var(--accent);border-radius:20px;font-size:11px;color:var(--accent);background:none;cursor:pointer">🗂 工作区</button>`
             : ''}
-          <button class="btn-primary btn-run-wf" data-id="${wf.id}">▶ 开始执行</button>
+          <button class="btn-primary btn-run-wf" data-id="${wf.id}">▶ 开始</button>
         </div>
       </div>
       <div class="wf-steps-list">${stepsHtml}</div>
+      <div class="wf-ctx-editor" style="display:none;margin-top:8px">
+        <div style="font-size:10px;color:var(--text3);margin-bottom:4px">招聘标准、候选人要求等全局背景（注入每步 system prompt）</div>
+        <textarea class="wf-ctx-textarea" rows="6" style="width:100%;font-size:11px;font-family:var(--font);border:1px solid var(--border);border-radius:8px;padding:7px 9px;resize:vertical;background:var(--bg-input);color:var(--text);outline:none;line-height:1.5">${escHtml(wf.context ?? '')}</textarea>
+        <div style="display:flex;justify-content:flex-end;gap:6px;margin-top:6px">
+          <button class="wf-ctx-cancel" style="height:26px;padding:0 12px;border:1px solid var(--border);border-radius:13px;font-size:11px;color:var(--text2);background:none;cursor:pointer">取消</button>
+          <button class="wf-ctx-save" style="height:26px;padding:0 12px;border:none;border-radius:13px;font-size:11px;font-weight:500;color:white;background:var(--accent);cursor:pointer">保存</button>
+        </div>
+      </div>
     `
     list.appendChild(card)
 
@@ -599,11 +730,34 @@ function renderWorkflowList() {
     toggleBtn.addEventListener('click', () => {
       const open = stepsList.style.display === 'flex'
       stepsList.style.display = open ? 'none' : 'flex'
-      toggleBtn.textContent = open ? '▸ 查看步骤' : '▾ 收起步骤'
+      toggleBtn.textContent = open ? '▸ 步骤' : '▾ 步骤'
+    })
+
+    // 内联 context 编辑
+    const ctxBtn = card.querySelector<HTMLButtonElement>('.wf-ctx-btn')!
+    const ctxEditor = card.querySelector<HTMLElement>('.wf-ctx-editor')!
+    const ctxTextarea = card.querySelector<HTMLTextAreaElement>('.wf-ctx-textarea')!
+    ctxBtn.addEventListener('click', () => {
+      const open = ctxEditor.style.display !== 'none'
+      ctxEditor.style.display = open ? 'none' : 'block'
+      ctxBtn.textContent = open ? '✏ 背景' : '✕ 背景'
+    })
+    card.querySelector<HTMLButtonElement>('.wf-ctx-cancel')!.addEventListener('click', () => {
+      ctxEditor.style.display = 'none'
+      ctxBtn.textContent = '✏ 背景'
+    })
+    card.querySelector<HTMLButtonElement>('.wf-ctx-save')!.addEventListener('click', async () => {
+      const newContext = ctxTextarea.value
+      const updated = settings.workflows.map((w) => w.id === wf.id ? { ...w, context: newContext } : w)
+      await saveSettings({ workflows: updated })
+      settings.workflows = updated
+      ctxEditor.style.display = 'none'
+      ctxBtn.textContent = '✏ 背景'
+      appendMessage('system', `✓ 工作流「${wf.name}」背景已更新`, { isLog: true })
     })
 
     card.querySelector<HTMLButtonElement>('.btn-workspace')?.addEventListener('click', () => {
-      const target = settings.workflows.find((w) => w.id === card.querySelector<HTMLButtonElement>('.btn-workspace')!.dataset.id)
+      const target = settings.workflows.find((w) => w.id === wf.id)
       if (target) {
         switchTab('workspace')
         renderWorkspaceTab(target)
@@ -626,6 +780,8 @@ async function startWorkflow(wf: Workflow) {
   loopMessages = []
   previousStepSummary = ''
   sessionMemory = {}   // 新工作流重置会话记忆
+  // 加载 Layer 1 持久记忆（缓存，供后续同步使用）
+  _cachedPersistentMemory = await loadPersistentMemory(wf.id)
 
   switchTab('chat')
   updateWorkflowProgress()
@@ -797,6 +953,7 @@ function refreshWorkspaceSelector() {
 
 function refreshWorkspaceTab() {
   refreshWorkspaceSelector()
+  renderMemoryPanel()   // 无论选哪个工作流都刷新记忆面板
   const wfId = workspaceActiveWfId ?? currentWorkflow?.id
   if (!wfId) return
   const wf = settings.workflows.find((w) => w.id === wfId)
@@ -943,6 +1100,8 @@ async function init() {
   // Loop 控制
   el('btnStart').addEventListener('click', async () => {
     if (loopState === 'paused' && currentWorkflow) {
+      // 刷新持久记忆缓存（用户可能在步骤间手动修改了记忆）
+      _cachedPersistentMemory = await loadPersistentMemory(currentWorkflow.id)
       const nextStep = currentWorkflow.steps[currentStepIndex]
       const resumeSystemPrompt = buildStepSystemPrompt(nextStep, currentWorkflow, currentStepIndex, settings.skills)
         + buildMemorySection()

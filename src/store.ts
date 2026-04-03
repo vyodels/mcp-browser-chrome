@@ -80,6 +80,7 @@ export const DEFAULT_SETTINGS: Settings = {
   activityLog: [],
   candidates: [],
   workspaceRecords: [],
+  memoryEntries: [],
 }
 
 export async function loadSettings(): Promise<Settings> {
@@ -93,6 +94,7 @@ export async function loadSettings(): Promise<Settings> {
       if (!merged.activityLog) merged.activityLog = []
       if (!merged.candidates) merged.candidates = []
       if (!merged.workspaceRecords) merged.workspaceRecords = []
+      if (!merged.memoryEntries) merged.memoryEntries = []
       resolve(merged)
     })
   })

@@ -277,20 +277,55 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
   },
   {
     name: 'save_memory',
-    description: '保存关键信息到会话记忆。记忆在整个任务执行期间持续有效，并注入每一步的 system prompt，让你在步骤切换后仍能访问关键决策和背景。适合保存：候选人决策列表、已完成事项汇总、重要配置、跨步骤需要记住的信息。',
+    description: `保存关键信息到分层记忆系统。支持两个层级：
+- session（默认）：会话记忆，本次任务运行期间有效，适合保存候选人决策进度、本次状态等
+- persistent：持久记忆，跨会话长期保存（即使关闭浏览器），适合保存网站操作技巧、已知 DOM 选择器、反检测经验等
+记忆会自动注入到后续每个步骤的 system prompt 中。`,
     parameters: {
       type: 'object',
       properties: {
         key: {
           type: 'string',
-          description: '记忆键名，简洁英文，如 candidate_decisions、completed_steps、important_findings',
+          description: '记忆键名，简洁英文，如 candidate_decisions、boss_popup_fix、screening_progress',
         },
         value: {
           type: 'string',
-          description: '要记忆的内容，建议简洁（<200字），如"张三-通过(8分), 李四-淘汰(技术不匹配), 王五-待定"',
+          description: '要记忆的内容，建议简洁（<300字）',
+        },
+        layer: {
+          type: 'string',
+          description: 'session（默认，本次任务有效）或 persistent（持久化跨会话）',
+          enum: ['session', 'persistent'],
         },
       },
       required: ['key', 'value'],
+    },
+  },
+  {
+    name: 'list_memory',
+    description: '查看当前所有记忆内容（持久记忆 + 会话记忆）。当需要了解已保存了哪些信息，或判断是否需要更新/删除某条记忆时调用。',
+    parameters: {
+      type: 'object',
+      properties: {},
+    },
+  },
+  {
+    name: 'delete_memory',
+    description: '删除一条记忆条目。当某条记忆已过时、不再准确或需要更新时，先删除再重新 save_memory。',
+    parameters: {
+      type: 'object',
+      properties: {
+        key: {
+          type: 'string',
+          description: '要删除的记忆键名',
+        },
+        layer: {
+          type: 'string',
+          description: 'session 或 persistent',
+          enum: ['session', 'persistent'],
+        },
+      },
+      required: ['key', 'layer'],
     },
   },
   {
@@ -366,8 +401,10 @@ export interface ToolExecuteContext {
   evolveSchema?: (proposal: SchemaProposal) => Promise<void>
   // 当前工作流 ID（用于 log_record 和 evolve_schema）
   workflowId?: string
-  // 会话记忆写入
-  saveMemory?: (key: string, value: string) => void
+  // 分层记忆系统
+  saveMemory?: (key: string, value: string, layer?: 'session' | 'persistent') => Promise<void> | void
+  listMemory?: () => { persistent: import('./types').MemoryEntry[]; session: Record<string, string> }
+  deleteMemory?: (key: string, layer: 'session' | 'persistent') => Promise<void> | void
   // 启动子代理执行独立子任务
   runSubAgent?: (task: string, context: string) => Promise<string>
 }
@@ -426,7 +463,11 @@ export async function executeTool(
       case 'evolve_schema':
         return await toolEvolveSchema(args as { field_name: string; field_id: string; field_type: string; options?: string; reason: string }, ctx)
       case 'save_memory':
-        return toolSaveMemory(args as { key: string; value: string }, ctx)
+        return await toolSaveMemory(args as { key: string; value: string; layer?: string }, ctx)
+      case 'list_memory':
+        return toolListMemory(ctx)
+      case 'delete_memory':
+        return await toolDeleteMemory(args as { key: string; layer: string }, ctx)
       case 'run_sub_agent':
         return await toolRunSubAgent(args as { task: string; context: string }, ctx)
       default:
@@ -691,10 +732,32 @@ async function toolEvolveSchema(
   }
 }
 
-function toolSaveMemory(args: { key: string; value: string }, ctx: ToolExecuteContext): ToolResult {
-  if (!ctx.saveMemory) return { success: false, error: '会话记忆功能未初始化' }
-  ctx.saveMemory(args.key, args.value)
-  return { success: true, data: `已保存记忆 [${args.key}]: ${args.value.slice(0, 50)}${args.value.length > 50 ? '...' : ''}` }
+async function toolSaveMemory(args: { key: string; value: string; layer?: string }, ctx: ToolExecuteContext): Promise<ToolResult> {
+  if (!ctx.saveMemory) return { success: false, error: '记忆功能未初始化' }
+  const layer = (args.layer === 'persistent' ? 'persistent' : 'session') as 'session' | 'persistent'
+  await ctx.saveMemory(args.key, args.value, layer)
+  return {
+    success: true,
+    data: `已保存到 ${layer === 'persistent' ? '📚 持久记忆' : '🧠 会话记忆'} [${args.key}]: ${args.value.slice(0, 60)}${args.value.length > 60 ? '...' : ''}`,
+  }
+}
+
+function toolListMemory(ctx: ToolExecuteContext): ToolResult {
+  if (!ctx.listMemory) return { success: false, error: '记忆查询功能未初始化' }
+  const { persistent, session } = ctx.listMemory()
+  const persLines = persistent.map((e) => `  [${e.key}]: ${e.value}`).join('\n') || '  (空)'
+  const sessLines = Object.entries(session).map(([k, v]) => `  [${k}]: ${v}`).join('\n') || '  (空)'
+  return {
+    success: true,
+    data: `📚 持久记忆（跨会话）:\n${persLines}\n\n🧠 会话记忆（本次任务）:\n${sessLines}`,
+  }
+}
+
+async function toolDeleteMemory(args: { key: string; layer: string }, ctx: ToolExecuteContext): Promise<ToolResult> {
+  if (!ctx.deleteMemory) return { success: false, error: '记忆删除功能未初始化' }
+  const layer = (args.layer === 'persistent' ? 'persistent' : 'session') as 'session' | 'persistent'
+  await ctx.deleteMemory(args.key, layer)
+  return { success: true, data: `已从 ${layer === 'persistent' ? '持久记忆' : '会话记忆'} 删除 [${args.key}]` }
 }
 
 async function toolRunSubAgent(args: { task: string; context: string }, ctx: ToolExecuteContext): Promise<ToolResult> {
