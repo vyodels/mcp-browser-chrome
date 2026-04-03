@@ -320,10 +320,48 @@ async function startWorkflow(wf: Workflow) {
 
   appendMessage('assistant', `🚀 开始工作流：**${wf.name}**\n共 ${wf.steps.length} 步`)
 
+  // 有 startUrl 时直接开好标签页并等待加载，避免 content script 未注入的问题
+  if (wf.startUrl) {
+    appendMessage('system', `📂 正在打开 ${wf.startUrl} ...`, { isLog: true })
+    const resp = await sendMsg({
+      type: 'OPEN_TAB_AND_WAIT',
+      payload: { url: wf.startUrl },
+    }) as { success: boolean; tabId?: number; error?: string }
+
+    if (resp.success && resp.tabId) {
+      targetTabId = resp.tabId
+      // 创建任务标签组
+      const groupId = await (async () => {
+        const r = await sendMsg({
+          type: 'CREATE_TAB_GROUP',
+          payload: { tabIds: [resp.tabId!], title: `Agent: ${wf.name}`, color: 'blue' },
+        }) as { success: boolean; groupId?: number }
+        return r.success ? r.groupId : undefined
+      })()
+      if (groupId) taskTabGroupId = groupId
+      appendMessage('system', `✓ 标签页已就绪 (tab ${resp.tabId})`, { isLog: true })
+
+      // 更新 tabSelector 选中项
+      const sel = el<HTMLSelectElement>('tabSelector')
+      const existing = sel.querySelector<HTMLOptionElement>(`option[value="${resp.tabId}"]`)
+      if (!existing) {
+        const opt = document.createElement('option')
+        opt.value = String(resp.tabId)
+        opt.textContent = wf.startUrl.slice(0, 45)
+        sel.appendChild(opt)
+      }
+      sel.value = String(resp.tabId)
+    } else {
+      appendMessage('assistant', `⚠️ 无法打开目标页面：${resp.error ?? '未知错误'}\n\n请手动打开 ${wf.startUrl}，然后在「目标页面」下拉框选中它，再点击「▶ 开始」。`)
+      setLoopState('paused')
+      return
+    }
+  }
+
   const firstStep = wf.steps[0]
   loopMessages = [
     { role: 'system', content: buildStepSystemPrompt(firstStep, wf, 0) },
-    { role: 'user', content: `请开始执行第一步：${firstStep.name}${wf.startUrl ? `\n目标页面：${wf.startUrl}` : ''}` },
+    { role: 'user', content: `请开始执行第一步：${firstStep.name}` },
   ]
 
   await runAgentLoop()

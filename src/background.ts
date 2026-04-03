@@ -101,6 +101,56 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       })
       return true
 
+    // 直接导航到 URL（不依赖 content script，background 层直接操作）
+    case 'NAVIGATE_TAB': {
+      const { url, targetTabId: navTabId } = message.payload as { url: string; targetTabId?: number }
+      resolveTab(navTabId).then((tab) => {
+        if (!tab?.id) { sendResponse({ success: false, error: '没有活跃标签页' }); return }
+        const tabId = tab.id
+        // 监听加载完成
+        const onUpdated = (updatedId: number, info: chrome.tabs.TabChangeInfo) => {
+          if (updatedId === tabId && info.status === 'complete') {
+            chrome.tabs.onUpdated.removeListener(onUpdated)
+            sendResponse({ success: true, tabId })
+          }
+        }
+        chrome.tabs.onUpdated.addListener(onUpdated)
+        chrome.tabs.update(tabId, { url }, (updated) => {
+          if (chrome.runtime.lastError || !updated) {
+            chrome.tabs.onUpdated.removeListener(onUpdated)
+            sendResponse({ success: false, error: chrome.runtime.lastError?.message ?? '导航失败' })
+          }
+        })
+      })
+      return true
+    }
+
+    // 开新 tab 并等待页面加载完成（工作流启动用）
+    case 'OPEN_TAB_AND_WAIT': {
+      const { url: waitUrl, groupId: waitGroupId } = message.payload as { url: string; groupId?: number }
+      chrome.tabs.create({ url: waitUrl, active: true }, (tab) => {
+        if (chrome.runtime.lastError || !tab?.id) {
+          sendResponse({ success: false, error: chrome.runtime.lastError?.message ?? '创建标签页失败' })
+          return
+        }
+        const newTabId = tab.id
+        const onUpdated = (updatedId: number, info: chrome.tabs.TabChangeInfo) => {
+          if (updatedId === newTabId && info.status === 'complete') {
+            chrome.tabs.onUpdated.removeListener(onUpdated)
+            if (waitGroupId !== undefined && waitGroupId >= 0) {
+              chrome.tabs.group({ tabIds: newTabId, groupId: waitGroupId }, () => {
+                sendResponse({ success: true, tabId: newTabId })
+              })
+            } else {
+              sendResponse({ success: true, tabId: newTabId })
+            }
+          }
+        }
+        chrome.tabs.onUpdated.addListener(onUpdated)
+      })
+      return true
+    }
+
     case 'OPEN_TAB': {
       const { url, groupId } = message.payload as { url?: string; groupId?: number }
       chrome.tabs.create({ url: url || 'about:blank', active: false }, (tab) => {

@@ -302,14 +302,21 @@ async function toolFillInput(args: { ref: string; value: string }, ctx: ToolExec
 }
 
 async function toolNavigateTo(args: { url: string }, ctx: ToolExecuteContext): Promise<ToolResult> {
-  const action: AgentAction = { action: 'navigate', url: args.url }
-  await ctx.sendMsg({
-    type: 'EXECUTE_ACTION_IN_TAB',
-    targetTabId: ctx.targetTabId,
-    payload: { type: 'EXECUTE_ACTION', payload: action },
-  })
-  // 等待页面加载后取快照
-  await new Promise((r) => setTimeout(r, 2000))
+  // 通过 background 直接调用 chrome.tabs.update，不依赖 content script
+  const resp = await ctx.sendMsg({
+    type: 'NAVIGATE_TAB',
+    payload: { url: args.url, targetTabId: ctx.targetTabId },
+  }) as { success: boolean; tabId?: number; error?: string }
+
+  if (!resp.success) return { success: false, error: resp.error ?? '导航失败' }
+
+  // 导航完成后更新 targetTabId（tabId 可能因 background 重新解析而变化）
+  if (resp.tabId && !ctx.targetTabId) {
+    ctx.targetTabId = resp.tabId
+  }
+
+  // 再等一小会确保 content script 注入完成
+  await new Promise((r) => setTimeout(r, 800))
   return await toolGetPageContent(ctx)
 }
 

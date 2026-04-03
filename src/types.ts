@@ -81,6 +81,8 @@ export type MessageType =
   | 'GET_ACTIVE_TAB'
   | 'EXECUTE_ACTION_IN_TAB'
   | 'OPEN_TAB'
+  | 'OPEN_TAB_AND_WAIT'
+  | 'NAVIGATE_TAB'
   | 'CREATE_TAB_GROUP'
   | 'CLOSE_TAB_GROUP'
   | 'DOWNLOAD_DATA'
