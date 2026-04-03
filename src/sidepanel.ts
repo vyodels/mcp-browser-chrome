@@ -7,7 +7,7 @@ import { chatWithTools } from './openai'
 import { TOOL_DEFINITIONS, executeTool, formatToolResult } from './tools'
 import { createTaskTabGroup, getAllTabs } from './tabManager'
 import { buildStepSystemPrompt } from './workflow'
-import type { Settings, LoopState, InterventionRequest, Workflow, ActivityEntry, ActivityType, CandidateEntry, CandidateStatus } from './types'
+import type { Settings, LoopState, InterventionRequest, Workflow, ActivityEntry, ActivityType, CandidateEntry, CandidateStatus, WorkspaceRecord, WorkspaceField, SchemaProposal, Skill } from './types'
 import type { ToolCallRequest } from './tools'
 
 // ============================================================
@@ -24,7 +24,7 @@ let currentWorkflow: Workflow | null = null
 let currentStepIndex = 0
 let pendingIntervention: ((answer: string) => void) | null = null
 let currentLogFilter: ActivityType | 'all' = 'all'
-let currentCandFilter: CandidateStatus | 'all' = 'all'
+let workspaceActiveWfId: string | undefined
 
 // ============================================================
 // 消息封装
@@ -225,23 +225,6 @@ function renderActivityLog(filter: ActivityType | 'all' = 'all') {
 // ============================================================
 // 候选人追踪
 // ============================================================
-const CANDIDATE_STATUS_LABELS: Record<CandidateStatus, string> = {
-  screening: '筛选中',
-  contacted: '已沟通',
-  resume_received: '已收简历',
-  interview_scheduled: '待面试',
-  passed: '✅ 通过',
-  rejected: '❌ 淘汰',
-}
-
-const CANDIDATE_STATUS_COLORS: Record<CandidateStatus, string> = {
-  screening: '#aeaeb2',
-  contacted: '#007aff',
-  resume_received: '#5856d6',
-  interview_scheduled: '#ff9f0a',
-  passed: '#30d158',
-  rejected: '#ff3b30',
-}
 
 async function upsertCandidate(
   entry: Partial<CandidateEntry> & { name: string; status: CandidateStatus }
@@ -270,39 +253,108 @@ async function upsertCandidate(
   return id
 }
 
-function renderCandidates(filterStatus: CandidateStatus | 'all' = 'all') {
-  loadSettings().then((s) => {
-    const container = el('candidateList')
-    if (!container) return
-    const list = filterStatus === 'all'
-      ? (s.candidates ?? [])
-      : (s.candidates ?? []).filter((c) => c.status === filterStatus)
 
-    if (list.length === 0) {
-      container.innerHTML = '<div class="log-empty">暂无候选人记录</div>'
-      return
-    }
+// ============================================================
+// 工作区记录（通用，按工作流隔离）
+// ============================================================
+async function upsertWorkspaceRecord(
+  workflowId: string,
+  recordId: string | undefined,
+  data: Record<string, string>
+): Promise<string> {
+  const s = await loadSettings()
+  const records = s.workspaceRecords ?? []
+  const now = Date.now()
+  const id = recordId && records.find((r) => r.id === recordId)
+    ? recordId
+    : `rec-${now}-${Math.random().toString(36).slice(2, 6)}`
 
-    container.innerHTML = list.map((c) => {
-      const color = CANDIDATE_STATUS_COLORS[c.status] ?? '#aeaeb2'
-      const label = CANDIDATE_STATUS_LABELS[c.status] ?? c.status
-      const time = new Date(c.updatedAt).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' })
-      const tags = c.tags?.length ? c.tags.map((t) => `<span class="cand-tag">${escHtml(t)}</span>`).join('') : ''
-      return `<div class="cand-card">
-        <div class="cand-header">
-          <span class="cand-name">${escHtml(c.name)}</span>
-          <span class="cand-status" style="color:${color};border-color:${color}">${label}</span>
-          <span class="cand-time">${time}</span>
-        </div>
-        ${c.position || c.company ? `<div class="cand-meta">${escHtml([c.position, c.company].filter(Boolean).join(' @ '))}</div>` : ''}
-        ${c.experience || c.education || c.salary ? `<div class="cand-meta cand-meta-secondary">${escHtml([c.experience, c.education, c.salary].filter(Boolean).join('  ·  '))}</div>` : ''}
-        ${c.notes ? `<div class="cand-notes">${escHtml(c.notes.slice(0, 200))}</div>` : ''}
-        ${c.interviewTime ? `<div class="cand-meta" style="color:var(--accent-orange)">📅 ${escHtml(c.interviewTime)}</div>` : ''}
-        ${c.resumeFile ? `<div class="cand-meta" style="color:var(--accent-green)">📎 ${escHtml(c.resumeFile)}</div>` : ''}
-        ${tags ? `<div class="cand-tags">${tags}</div>` : ''}
-      </div>`
-    }).join('')
+  const existing = records.find((r) => r.id === id)
+  const updated: WorkspaceRecord = {
+    id,
+    workflowId,
+    data: { ...(existing?.data ?? {}), ...data },
+    createdAt: existing?.createdAt ?? now,
+    updatedAt: now,
+  }
+  const newList = existing ? records.map((r) => r.id === id ? updated : r) : [updated, ...records]
+  await saveSettings({ workspaceRecords: newList })
+  return id
+}
+
+async function addWorkspaceField(proposal: SchemaProposal): Promise<void> {
+  const s = await loadSettings()
+  const workflows = s.workflows.map((wf) => {
+    if (wf.id !== proposal.workflowId) return wf
+    const fields = wf.workspace?.fields ?? []
+    if (fields.find((f) => f.id === proposal.field.id)) return wf // 已存在
+    return { ...wf, workspace: { fields: [...fields, proposal.field] } }
   })
+  await saveSettings({ workflows })
+  appendMessage('system', `🔧 AI 提议新字段「${proposal.field.name}」已添加到工作流「${proposal.workflowName}」`, { isLog: true })
+}
+
+async function saveAiSkill(skill: Skill): Promise<void> {
+  const s = await loadSettings()
+  const skills = [skill, ...(s.skills ?? [])]
+  await saveSettings({ skills })
+  showSkillProposalBanner(skill)
+}
+
+function showSkillProposalBanner(skill: Skill) {
+  const banner = document.getElementById('skillProposalBanner')
+  if (!banner) return
+  banner.innerHTML = `
+    <div class="skill-proposal-card">
+      <div class="sp-header">
+        <span class="sp-badge">🧠 AI 发现</span>
+        <span class="sp-name">${escHtml(skill.name)}</span>
+      </div>
+      <div class="sp-context">${escHtml(skill.aiContext ?? '')}</div>
+      <div class="sp-desc">${escHtml(skill.description)}</div>
+      <div class="sp-actions">
+        <button class="sp-approve" data-id="${skill.id}">✓ 批准</button>
+        <button class="sp-reject" data-id="${skill.id}">✕ 拒绝</button>
+        <button class="sp-view" data-id="${skill.id}">查看详情</button>
+      </div>
+    </div>
+  `
+  banner.style.display = 'block'
+
+  banner.querySelector('.sp-approve')!.addEventListener('click', async () => {
+    const s = await loadSettings()
+    await saveSettings({ skills: s.skills.map((sk) => sk.id === skill.id ? { ...sk, status: 'active' as const } : sk) })
+    banner.style.display = 'none'
+    appendMessage('system', `✓ Skill「${skill.name}」已批准并激活`, { isLog: true })
+  })
+
+  banner.querySelector('.sp-reject')!.addEventListener('click', async () => {
+    const s = await loadSettings()
+    await saveSettings({ skills: s.skills.filter((sk) => sk.id !== skill.id) })
+    banner.style.display = 'none'
+    appendMessage('system', `✕ Skill「${skill.name}」已拒绝删除`, { isLog: true })
+  })
+
+  banner.querySelector('.sp-view')!.addEventListener('click', () => {
+    chrome.runtime.sendMessage({ type: 'OPEN_SETTINGS' })
+  })
+}
+
+function renderWorkspaceTab(workflow: Workflow) {
+  const titleEl = el('workspaceTitle')
+  if (titleEl) titleEl.textContent = `${workflow.name} · 工作区`
+  workspaceActiveWfId = workflow.id
+  const sel = el<HTMLSelectElement>('workspaceWfSelector')
+  if (sel) sel.value = workflow.id
+  renderWorkspaceFilterBar(workflow)
+  renderWorkspaceTabFiltered(workflow)
+}
+
+function getStatusColor(field: WorkspaceField | undefined, value: string | undefined): string {
+  if (!field || !value) return '#aeaeb2'
+  const idx = (field.options ?? []).indexOf(value)
+  const colors = ['#aeaeb2', '#007aff', '#5856d6', '#ff9f0a', '#30d158', '#ff3b30', '#34c759']
+  return colors[idx % colors.length] ?? '#aeaeb2'
 }
 
 // ============================================================
@@ -312,13 +364,19 @@ async function runAgentLoop(initialUserMessage?: string) {
   if (loopState === 'running') return
   setLoopState('running')
 
+  const wfId = currentWorkflow?.id
   const ctx = {
     targetTabId,
     taskName,
     tabGroupId: taskTabGroupId,
+    workflowId: wfId,
     sendMsg,
     logActivity: addActivityEntry,
     logCandidate: upsertCandidate,
+    logRecord: (recordId: string | undefined, data: Record<string, string>) =>
+      upsertWorkspaceRecord(wfId ?? 'general', recordId, data),
+    saveSkill: saveAiSkill,
+    evolveSchema: addWorkspaceField,
   }
 
   if (initialUserMessage) {
@@ -403,6 +461,10 @@ async function runAgentLoop(initialUserMessage?: string) {
           if (result.screenshotDataUrl) {
             appendMessage('assistant', '📸 截图', { imageDataUrl: result.screenshotDataUrl })
           }
+          // 工作区数据变化时刷新
+          if (toolCall.name === 'log_record' && currentWorkflow) {
+            renderWorkspaceTab(currentWorkflow)
+          }
           pushToolResult(toolCall, resultText)
         }
       }
@@ -462,7 +524,12 @@ function renderWorkflowList() {
       ${wf.startUrl ? `<p class="wf-url">🔗 ${escHtml(wf.startUrl)}</p>` : ''}
       <div class="wf-footer">
         <button class="wf-toggle-btn">▸ 查看步骤</button>
-        <button class="btn-primary btn-run-wf" data-id="${wf.id}">▶ 开始执行</button>
+        <div style="display:flex;gap:6px">
+          ${(wf.workspace?.fields.length ?? 0) > 0
+            ? `<button class="btn-workspace" data-id="${wf.id}" style="height:30px;padding:0 10px;border:1px solid var(--accent);border-radius:20px;font-size:11px;color:var(--accent);background:none;cursor:pointer">🗂 工作区</button>`
+            : ''}
+          <button class="btn-primary btn-run-wf" data-id="${wf.id}">▶ 开始执行</button>
+        </div>
       </div>
       <div class="wf-steps-list">${stepsHtml}</div>
     `
@@ -474,6 +541,14 @@ function renderWorkflowList() {
       const open = stepsList.style.display === 'flex'
       stepsList.style.display = open ? 'none' : 'flex'
       toggleBtn.textContent = open ? '▸ 查看步骤' : '▾ 收起步骤'
+    })
+
+    card.querySelector<HTMLButtonElement>('.btn-workspace')?.addEventListener('click', () => {
+      const target = settings.workflows.find((w) => w.id === card.querySelector<HTMLButtonElement>('.btn-workspace')!.dataset.id)
+      if (target) {
+        switchTab('workspace')
+        renderWorkspaceTab(target)
+      }
     })
   })
 
@@ -556,6 +631,110 @@ function updateWorkflowProgress() {
 }
 
 // ============================================================
+// 工作区
+// ============================================================
+function refreshWorkspaceSelector() {
+  const sel = el<HTMLSelectElement>('workspaceWfSelector')
+  if (!sel) return
+  const prev = sel.value
+  sel.innerHTML = '<option value="">选择工作流…</option>'
+  settings.workflows.forEach((wf) => {
+    if (!wf.workspace?.fields.length) return
+    const opt = document.createElement('option')
+    opt.value = wf.id
+    opt.textContent = wf.name
+    sel.appendChild(opt)
+  })
+  if (prev) sel.value = prev
+}
+
+function refreshWorkspaceTab() {
+  refreshWorkspaceSelector()
+  const wfId = workspaceActiveWfId ?? currentWorkflow?.id
+  if (!wfId) return
+  const wf = settings.workflows.find((w) => w.id === wfId)
+  if (wf) {
+    const sel = el<HTMLSelectElement>('workspaceWfSelector')
+    if (sel && !sel.value) sel.value = wfId
+    renderWorkspaceFilterBar(wf)
+    renderWorkspaceTab(wf)
+  }
+}
+
+function renderWorkspaceFilterBar(wf: import('./types').Workflow) {
+  const bar = el('workspaceFilterBar')
+  if (!bar) return
+  const statusField = wf.workspace?.fields.find((f) => f.type === 'status')
+  if (!statusField?.options?.length) {
+    bar.style.display = 'none'
+    return
+  }
+  bar.style.display = 'flex'
+  bar.innerHTML = ['全部', ...statusField.options].map((opt, i) =>
+    `<button class="filter-btn${i === 0 ? ' active' : ''}" data-ws-status="${opt}">${escHtml(opt)}</button>`
+  ).join('')
+  bar.querySelectorAll<HTMLButtonElement>('[data-ws-status]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      bar.querySelectorAll('.filter-btn').forEach((b) => b.classList.remove('active'))
+      btn.classList.add('active')
+      renderWorkspaceTabFiltered(wf, btn.dataset.wsStatus === '全部' ? undefined : btn.dataset.wsStatus)
+    })
+  })
+}
+
+function renderWorkspaceTabFiltered(wf: import('./types').Workflow, statusFilter?: string) {
+  loadSettings().then((s) => {
+    const schema = wf.workspace?.fields ?? []
+    const statusField = schema.find((f) => f.type === 'status')
+    let records = (s.workspaceRecords ?? []).filter((r) => r.workflowId === wf.id)
+    if (statusFilter && statusField) {
+      records = records.filter((r) => r.data[statusField.id] === statusFilter)
+    }
+    renderWorkspaceRecords(el('workspaceRecords'), schema, records)
+  })
+}
+
+function renderWorkspaceRecords(
+  container: HTMLElement | null,
+  schema: import('./types').WorkspaceField[],
+  records: WorkspaceRecord[]
+) {
+  if (!container) return
+  if (records.length === 0) {
+    container.innerHTML = '<div class="workspace-empty">暂无记录。AI 执行工作流时会自动写入。</div>'
+    return
+  }
+  const nameField = schema.find((f) => f.required) ?? schema[0]
+  const statusField = schema.find((f) => f.type === 'status')
+
+  container.innerHTML = records.map((rec) => {
+    const name = nameField ? rec.data[nameField.id] ?? '未命名' : '未命名'
+    const status = statusField ? rec.data[statusField.id] : undefined
+    const statusColor = getStatusColor(statusField, status)
+    const time = new Date(rec.updatedAt).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' })
+
+    const otherFields = schema
+      .filter((f) => f.id !== nameField?.id && f.id !== statusField?.id && rec.data[f.id])
+      .map((f) => {
+        const val = rec.data[f.id]
+        if (f.type === 'tags') {
+          return val.split(',').map((t) => `<span class="cand-tag">${escHtml(t.trim())}</span>`).join('')
+        }
+        return `<span class="ws-field"><span class="ws-field-label">${escHtml(f.name)}:</span>${escHtml(val)}</span>`
+      }).join('')
+
+    return `<div class="cand-card">
+      <div class="cand-header">
+        <span class="cand-name">${escHtml(name)}</span>
+        ${status ? `<span class="cand-status" style="color:${statusColor};border-color:${statusColor}">${escHtml(status)}</span>` : ''}
+        <span class="cand-time">${time}</span>
+      </div>
+      ${otherFields ? `<div class="ws-fields" style="margin-top:5px;display:flex;flex-wrap:wrap;gap:6px">${otherFields}</div>` : ''}
+    </div>`
+  }).join('')
+}
+
+// ============================================================
 // 标签切换
 // ============================================================
 function switchTab(tab: string) {
@@ -566,7 +745,7 @@ function switchTab(tab: string) {
     panel.style.display = panel.dataset.tab === tab ? 'flex' : 'none'
   })
   if (tab === 'log') renderActivityLog(currentLogFilter)
-  if (tab === 'candidates') renderCandidates(currentCandFilter)
+  if (tab === 'workspace') refreshWorkspaceTab()
 }
 
 // ============================================================
@@ -607,16 +786,6 @@ async function init() {
       btn.classList.add('active')
       currentLogFilter = (btn.dataset.filter ?? 'all') as ActivityType | 'all'
       renderActivityLog(currentLogFilter)
-    })
-  })
-
-  // 候选人过滤
-  document.querySelectorAll<HTMLButtonElement>('[data-cand-filter]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      document.querySelectorAll<HTMLButtonElement>('[data-cand-filter]').forEach((b) => b.classList.remove('active'))
-      btn.classList.add('active')
-      currentCandFilter = (btn.dataset.candFilter ?? 'all') as CandidateStatus | 'all'
-      renderCandidates(currentCandFilter)
     })
   })
 
@@ -706,12 +875,22 @@ async function init() {
     chrome.runtime.sendMessage({ type: 'OPEN_SETTINGS' })
   })
 
+  // 工作区工作流选择器
+  el('workspaceWfSelector')?.addEventListener('change', (e) => {
+    workspaceActiveWfId = (e.target as HTMLSelectElement).value || undefined
+    if (workspaceActiveWfId) {
+      const wf = settings.workflows.find((w) => w.id === workspaceActiveWfId)
+      if (wf) renderWorkspaceTab(wf)
+    }
+  })
+
   // 设置更新监听
   chrome.runtime.onMessage.addListener((msg) => {
     if (msg.type === 'SETTINGS_UPDATED') {
       loadSettings().then((s) => {
         settings = s
         renderWorkflowList()
+        refreshWorkspaceSelector()
       })
     }
   })

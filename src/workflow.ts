@@ -1,9 +1,37 @@
 // ============================================================
 // workflow.ts — 工作流数据结构和执行辅助
 // ============================================================
-import type { Workflow, WorkflowStep, Skill } from './types'
+import type { Workflow, WorkflowStep, Skill, WorkspaceField } from './types'
 
 export type { Workflow, WorkflowStep }
+
+// ---- 预设工作区 Schema ----
+
+const RECRUIT_WORKSPACE_FIELDS: WorkspaceField[] = [
+  { id: 'name',           name: '姓名',     type: 'text',   required: true },
+  { id: 'status',         name: '状态',     type: 'status', required: true,
+    options: ['筛选中', '已沟通', '待收简历', '已收简历', '待面试', '通过', '淘汰'] },
+  { id: 'position',       name: '职位',     type: 'text' },
+  { id: 'company',        name: '公司',     type: 'text' },
+  { id: 'experience',     name: '工作年限', type: 'text' },
+  { id: 'education',      name: '学历',     type: 'text' },
+  { id: 'salary',         name: '期望薪资', type: 'text' },
+  { id: 'score',          name: '综合评分', type: 'number' },
+  { id: 'interview_time', name: '面试时间', type: 'date' },
+  { id: 'tags',           name: '标签',     type: 'tags' },
+  { id: 'notes',          name: '备注',     type: 'text' },
+  { id: 'resume_file',    name: '简历文件', type: 'text' },
+]
+
+const XIAOHONGSHU_WORKSPACE_FIELDS: WorkspaceField[] = [
+  { id: 'title',    name: '标题',   type: 'text',   required: true },
+  { id: 'author',   name: '作者',   type: 'text' },
+  { id: 'likes',    name: '点赞数', type: 'number' },
+  { id: 'comments', name: '评论数', type: 'number' },
+  { id: 'tags',     name: '话题',   type: 'tags' },
+  { id: 'summary',  name: '正文摘要', type: 'text' },
+  { id: 'url',      name: '帖子链接', type: 'url' },
+]
 
 // 工作流执行状态（侧边栏持有）
 export interface WorkflowRunState {
@@ -41,6 +69,7 @@ export function createDefaultWorkflows(): Workflow[] {
 
 重要：每处理完一个候选人，无论结果如何，都必须调用 log_candidate 工具记录其信息和当前状态。`,
       startUrl: 'https://www.zhipin.com/web/geek/chat',
+      workspace: { fields: RECRUIT_WORKSPACE_FIELDS },
       createdAt: Date.now(),
       steps: [
         {
@@ -186,6 +215,7 @@ export function createDefaultWorkflows(): Workflow[] {
 数据字段：标题、正文、作者、点赞数、评论数、话题标签、帖子链接
 目标数量：≥20条`,
       startUrl: 'https://www.xiaohongshu.com',
+      workspace: { fields: XIAOHONGSHU_WORKSPACE_FIELDS },
       createdAt: Date.now(),
       steps: [
         {
@@ -255,8 +285,17 @@ export function buildStepSystemPrompt(
     ? `\n## 工作流全局背景与要求\n${workflow.context}\n`
     : ''
 
+  // 工作区 schema 注入：告知 AI 当前工作流有哪些字段可以记录
+  const workspaceSection = workflow.workspace?.fields.length
+    ? `\n## 工作区数据字段（调用 log_record 时使用这些字段名）\n${
+        workflow.workspace.fields.map((f) =>
+          `- **${f.name}**（id: \`${f.id}\`）：${f.type}${f.options?.length ? `，可选值: ${f.options.join('/')}` : ''}${f.required ? '（必填）' : ''}`
+        ).join('\n')
+      }\n\n调用 log_record 时，data 参数传 JSON：{"${workflow.workspace.fields[0]?.id}": "值", ...}\n`
+    : ''
+
   return `你正在执行工作流「${workflow.name}」的第 ${stepIndex + 1}/${workflow.steps.length} 步：「${step.name}」
-${contextSection}${skillsSection}
+${contextSection}${workspaceSection}${skillsSection}
 ## 当前步骤任务
 ${step.instructions}
 

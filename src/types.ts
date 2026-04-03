@@ -16,12 +16,37 @@ export interface WorkflowStep {
   skillIds?: string[]        // 引用的 Skill ID，其 instructions 会注入本步骤
 }
 
+// ---- 工作区 Schema（每个工作流独立） ----
+export type WorkspaceFieldType = 'text' | 'status' | 'number' | 'date' | 'tags' | 'url'
+
+export interface WorkspaceField {
+  id: string
+  name: string
+  type: WorkspaceFieldType
+  options?: string[]         // status 类型的枚举值
+  required?: boolean
+  aiProposed?: boolean       // AI 提议的字段（待用户确认）
+}
+
+export interface WorkspaceSchema {
+  fields: WorkspaceField[]
+}
+
+export interface WorkspaceRecord {
+  id: string
+  workflowId: string
+  data: Record<string, string>   // fieldId → value
+  createdAt: number
+  updatedAt: number
+}
+
 export interface Workflow {
   id: string
   name: string
   description: string
-  context?: string           // 全局背景/要求（如候选人标准），注入每一步 system prompt
+  context?: string           // 全局背景/要求，注入每一步 system prompt
   startUrl?: string
+  workspace?: WorkspaceSchema    // 该工作流的数据 schema
   steps: WorkflowStep[]
   createdAt: number
 }
@@ -40,6 +65,7 @@ export interface Settings {
   workflows: Workflow[]
   activityLog: ActivityEntry[]
   candidates: CandidateEntry[]
+  workspaceRecords: WorkspaceRecord[]
 }
 
 export interface SavedPrompt {
@@ -49,7 +75,8 @@ export interface SavedPrompt {
   createdAt: number
 }
 
-export type SkillStatus = 'active' | 'disabled' | 'error'
+export type SkillStatus = 'active' | 'disabled' | 'pending_review'
+export type SkillSource = 'builtin' | 'user' | 'ai_generated'
 
 export interface Skill {
   id: string
@@ -58,8 +85,10 @@ export interface Skill {
   trigger: string
   instructions: string
   status: SkillStatus
+  source?: SkillSource       // 来源标记
   createdAt: number
   lastUsed?: number
+  aiContext?: string         // AI 生成时的上下文说明（为什么生成这个 skill）
 }
 
 export interface TabInfo {
@@ -190,28 +219,28 @@ export interface ActivityEntry {
   taskName?: string
 }
 
-// 候选人追踪
+// 候选人追踪（BOSS招聘工作流专用）
 export type CandidateStatus =
-  | 'screening'           // 筛选中
-  | 'contacted'           // 已发起沟通
-  | 'resume_received'     // 已收到简历
-  | 'interview_scheduled' // 已预约面试
-  | 'passed'              // 通过
-  | 'rejected'            // 淘汰
+  | 'screening'
+  | 'contacted'
+  | 'resume_received'
+  | 'interview_scheduled'
+  | 'passed'
+  | 'rejected'
 
 export interface CandidateEntry {
   id: string
   name: string
   status: CandidateStatus
-  position?: string       // 应聘/当前职位
-  company?: string        // 当前公司
-  experience?: string     // 工作年限
-  education?: string      // 学历
-  salary?: string         // 期望薪资
+  position?: string
+  company?: string
+  experience?: string
+  education?: string
+  salary?: string
   phone?: string
-  notes?: string          // 备注：沟通情况、匹配分析
-  resumeFile?: string     // 简历文件名
-  interviewTime?: string  // 面试时间
+  notes?: string
+  resumeFile?: string
+  interviewTime?: string
   tags?: string[]
   workflowId?: string
   taskName?: string
@@ -222,6 +251,20 @@ export interface CandidateEntry {
 // 用户介入请求（ask_user 工具触发）
 export interface InterventionRequest {
   question: string
-  options?: string[]       // 若有选项则显示按钮，否则文本输入
+  options?: string[]
   placeholder?: string
+}
+
+// AI 提议 schema 演进（evolve_schema 工具触发）
+export interface SchemaProposal {
+  workflowId: string
+  workflowName: string
+  field: WorkspaceField
+  reason: string
+}
+
+// AI 生成的 Skill 待审批通知
+export interface SkillProposal {
+  skill: Skill
+  context: string    // AI 说明为什么生成这个 skill
 }

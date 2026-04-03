@@ -387,6 +387,48 @@
     .wf-step-name { font-size: 12px; font-weight: 500; }
     .wf-step-intervention { font-size: 11px; color: var(--text2); margin-top: 2px; }
 
+    /* ---- 工作区 ---- */
+    .workspace-panel { flex: 1; overflow-y: auto; display: flex; flex-direction: column; min-height: 0; }
+    .workspace-header {
+      padding: 8px 12px; border-bottom: 1px solid var(--border-light); flex-shrink: 0;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .workspace-title { font-size: 13px; font-weight: 600; flex: 1; }
+    .workspace-empty { text-align: center; color: var(--text3); font-size: 12px; padding: 40px 0; }
+    .ws-fields { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 3px; }
+    .ws-field { font-size: 11px; color: var(--text2); }
+    .ws-field-label { color: var(--text3); margin-right: 3px; }
+
+    /* ---- Skill 待审批 banner ---- */
+    #skillProposalBanner {
+      display: none; margin: 6px 10px;
+      background: rgba(88,86,214,0.06);
+      border: 1px solid rgba(88,86,214,0.2);
+      border-radius: var(--radius); padding: 10px 12px; flex-shrink: 0;
+    }
+    .skill-proposal-card { display: flex; flex-direction: column; gap: 6px; }
+    .sp-header { display: flex; align-items: center; gap: 6px; }
+    .sp-badge {
+      font-size: 10px; padding: 2px 7px; border-radius: 8px;
+      background: rgba(88,86,214,0.12); color: #5856d6; font-weight: 600; flex-shrink: 0;
+    }
+    .sp-name { font-size: 12px; font-weight: 600; }
+    .sp-context { font-size: 11px; color: var(--text2); line-height: 1.5; }
+    .sp-desc { font-size: 11px; color: var(--text3); }
+    .sp-actions { display: flex; gap: 6px; }
+    .sp-approve {
+      padding: 4px 12px; border-radius: 12px; font-size: 11px; font-weight: 500;
+      background: var(--accent-green); border: none; color: white; cursor: pointer;
+    }
+    .sp-reject {
+      padding: 4px 12px; border-radius: 12px; font-size: 11px; font-weight: 500;
+      background: none; border: 1px solid var(--accent-red); color: var(--accent-red); cursor: pointer;
+    }
+    .sp-view {
+      padding: 4px 12px; border-radius: 12px; font-size: 11px;
+      background: none; border: 1px solid var(--border); color: var(--text2); cursor: pointer;
+    }
+
     /* ---- 候选人卡片 ---- */
     .cand-panel { flex: 1; overflow-y: auto; display: flex; flex-direction: column; min-height: 0; }
     .cand-toolbar {
@@ -508,9 +550,9 @@
 <div class="tabs">
   <button class="tab-btn active" data-tab="chat">💬 对话</button>
   <button class="tab-btn" data-tab="workflow">⚡ 工作流</button>
+  <button class="tab-btn" data-tab="workspace">🗂 工作区</button>
   <button class="tab-btn" data-tab="log">📋 记录</button>
-  <button class="tab-btn" data-tab="candidates">👤 候选人</button>
-  <button class="tab-btn" data-tab="settings-tab">🔧 设置</button>
+  <button class="tab-btn" data-tab="settings-tab">⚙️ 设置</button>
 </div>
 
 <!-- 对话标签 -->
@@ -545,6 +587,9 @@
     </div>
   </div>
 
+  <!-- AI 生成 Skill 待审批 -->
+  <div id="skillProposalBanner"></div>
+
   <div id="controlBar">
     <button class="ctrl-btn ctrl-btn--primary" id="btnStart">▶ 开始</button>
     <button class="ctrl-btn" id="btnPause">⏸</button>
@@ -565,6 +610,8 @@
   </div>
 </div>
 
+<!-- 侧边栏工具链状态（全局，悬浮在工作流tab上） -->
+
 <!-- 记录标签 -->
 <div class="tab-panel" data-tab="log">
   <div class="log-panel">
@@ -583,19 +630,19 @@
   </div>
 </div>
 
-<!-- 候选人标签 -->
-<div class="tab-panel" data-tab="candidates">
-  <div class="cand-panel">
-    <div class="cand-toolbar">
-      <button class="filter-btn active" data-cand-filter="all">全部</button>
-      <button class="filter-btn" data-cand-filter="screening">筛选中</button>
-      <button class="filter-btn" data-cand-filter="contacted">已沟通</button>
-      <button class="filter-btn" data-cand-filter="resume_received">简历</button>
-      <button class="filter-btn" data-cand-filter="interview_scheduled">待面试</button>
-      <button class="filter-btn" data-cand-filter="passed">通过</button>
+<!-- 工作区标签 -->
+<div class="tab-panel" data-tab="workspace">
+  <div class="workspace-panel">
+    <div class="workspace-header">
+      <span class="workspace-title" id="workspaceTitle">工作区</span>
+      <select id="workspaceWfSelector" class="tab-select" style="max-width:140px;font-size:11px;height:24px;padding:0 6px">
+        <option value="">选择工作流…</option>
+      </select>
     </div>
-    <div class="cand-list" id="candidateList">
-      <div class="log-empty">暂无候选人记录</div>
+    <!-- 工作流 schema 状态字段过滤（动态生成） -->
+    <div id="workspaceFilterBar" style="display:none;padding:6px 10px;border-bottom:1px solid var(--border-light);display:flex;gap:4px;flex-wrap:wrap;flex-shrink:0"></div>
+    <div class="cand-list" id="workspaceRecords">
+      <div class="workspace-empty">请在左侧选择工作流，执行后记录会自动出现。</div>
     </div>
   </div>
 </div>

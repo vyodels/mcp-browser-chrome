@@ -3,7 +3,7 @@
 // LLM 通过 function/tool calling API 调用这些工具
 // 工具定义在本地，LLM 调用通过远程 OpenAI/Anthropic API
 // ============================================================
-import type { PageSnapshot, AgentAction, InterventionRequest, ActivityEntry, CandidateEntry, CandidateStatus } from './types'
+import type { PageSnapshot, AgentAction, InterventionRequest, ActivityEntry, CandidateEntry, CandidateStatus, SchemaProposal, Skill } from './types'
 
 // Re-export for use by openai.ts and sidepanel.ts
 export type { ToolCallRequest } from './types'
@@ -227,6 +227,85 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
       required: ['name', 'status'],
     },
   },
+  {
+    name: 'log_record',
+    description: '向当前工作流的工作区写入或更新一条数据记录。使用工作流定义的字段名（field id）作为 data 的 key。每处理完一个关键数据项（候选人/帖子/文章等）都应调用此工具。',
+    parameters: {
+      type: 'object',
+      properties: {
+        record_id: {
+          type: 'string',
+          description: '记录唯一 ID。更新已有记录时传入之前返回的 id；新记录留空自动生成。',
+        },
+        data: {
+          type: 'string',
+          description: '记录数据，JSON 字符串，key 为工作流 schema 中的字段 id，value 为字符串值。例：{"name":"张三","status":"已沟通","score":"8"}',
+        },
+      },
+      required: ['data'],
+    },
+  },
+  {
+    name: 'save_skill',
+    description: '将当前执行中发现的有效解法固化为可复用的 Skill，供未来相同场景直接调用。当你找到了一个通用的解决方案（如处理某类弹窗、解析特定网站结构、处理验证码绕过等）时，应主动调用此工具保存。',
+    parameters: {
+      type: 'object',
+      properties: {
+        name: {
+          type: 'string',
+          description: 'Skill 名称，简洁描述能力，如"BOSS直聘弹窗关闭"',
+        },
+        description: {
+          type: 'string',
+          description: '一句话描述该 Skill 的用途和适用场景',
+        },
+        trigger: {
+          type: 'string',
+          description: '触发关键词（竖线分隔），如"弹窗|Dialog|浮层关闭"',
+        },
+        instructions: {
+          type: 'string',
+          description: '可复用的操作指令，要足够通用，未来同类场景可直接参考执行',
+        },
+        context: {
+          type: 'string',
+          description: '说明为什么生成这个 Skill，以及在什么情况下触发的（帮助用户审批决策）',
+        },
+      },
+      required: ['name', 'description', 'instructions', 'context'],
+    },
+  },
+  {
+    name: 'evolve_schema',
+    description: '当当前工作流的数据字段不足以记录关键信息时，提议添加新字段到工作区 schema。字段会立即生效，用户可在设置页审核。每次最多提议一个字段。',
+    parameters: {
+      type: 'object',
+      properties: {
+        field_name: {
+          type: 'string',
+          description: '新字段的显示名称，如"简历评分"',
+        },
+        field_id: {
+          type: 'string',
+          description: '字段唯一标识（英文/拼音，如 resume_score），用于 log_record 的 data key',
+        },
+        field_type: {
+          type: 'string',
+          description: '字段类型',
+          enum: ['text', 'number', 'status', 'date', 'tags', 'url'],
+        },
+        options: {
+          type: 'string',
+          description: 'status 类型的枚举值，逗号分隔，如"优秀,良好,一般,差"',
+        },
+        reason: {
+          type: 'string',
+          description: '说明为什么当前 schema 不满足需求，以及这个字段会记录什么信息',
+        },
+      },
+      required: ['field_name', 'field_id', 'field_type', 'reason'],
+    },
+  },
 ]
 
 // ---- 工具执行上下文 ----
@@ -243,6 +322,14 @@ export interface ToolExecuteContext {
   logActivity?: (entry: Omit<ActivityEntry, 'id' | 'timestamp'>) => void
   // 候选人记录写入/更新（由 loop 外部注入）
   logCandidate?: (entry: Partial<CandidateEntry> & { name: string; status: CandidateStatus }) => Promise<string>
+  // 工作区通用记录写入（由 loop 外部注入）
+  logRecord?: (recordId: string | undefined, data: Record<string, string>) => Promise<string>
+  // AI 生成 Skill（待审批）
+  saveSkill?: (skill: Skill) => Promise<void>
+  // Schema 演进提议
+  evolveSchema?: (proposal: SchemaProposal) => Promise<void>
+  // 当前工作流 ID（用于 log_record 和 evolve_schema）
+  workflowId?: string
 }
 
 // ---- 工具执行结果 ----
@@ -255,6 +342,8 @@ export interface ToolResult {
   interventionRequest?: InterventionRequest
   // take_screenshot 返回的图像
   screenshotDataUrl?: string
+  // AI 提议新 Skill（待审批）
+  skillProposal?: { skill: Skill; context: string }
 }
 
 // ---- 执行路由 ----
@@ -290,6 +379,12 @@ export async function executeTool(
         return toolAskUser(args as { question: string; options?: string; placeholder?: string })
       case 'log_candidate':
         return await toolLogCandidate(args as unknown as CandidateArgs, ctx)
+      case 'log_record':
+        return await toolLogRecord(args as { record_id?: string; data: string }, ctx)
+      case 'save_skill':
+        return await toolSaveSkill(args as { name: string; description: string; trigger?: string; instructions: string; context: string }, ctx)
+      case 'evolve_schema':
+        return await toolEvolveSchema(args as { field_name: string; field_id: string; field_type: string; options?: string; reason: string }, ctx)
       default:
         return { success: false, error: `未知工具: ${name}` }
     }
@@ -486,6 +581,69 @@ async function toolLogCandidate(args: CandidateArgs, ctx: ToolExecuteContext): P
   return {
     success: true,
     data: `候选人记录已${args.id ? '更新' : '创建'}：${args.name} [${args.status}]，id=${newId}`,
+  }
+}
+
+async function toolLogRecord(
+  args: { record_id?: string; data: string },
+  ctx: ToolExecuteContext
+): Promise<ToolResult> {
+  if (!ctx.logRecord) return { success: false, error: '工作区记录功能未初始化' }
+  let data: Record<string, string>
+  try {
+    data = JSON.parse(args.data)
+  } catch {
+    return { success: false, error: `data 参数必须是合法 JSON 字符串，收到：${args.data.slice(0, 100)}` }
+  }
+  const id = await ctx.logRecord(args.record_id, data)
+  return { success: true, data: `记录已${args.record_id ? '更新' : '创建'}，id=${id}` }
+}
+
+async function toolSaveSkill(
+  args: { name: string; description: string; trigger?: string; instructions: string; context: string },
+  ctx: ToolExecuteContext
+): Promise<ToolResult> {
+  if (!ctx.saveSkill) return { success: false, error: 'Skill 保存功能未初始化' }
+  const skill: Skill = {
+    id: `skill-ai-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    name: args.name,
+    description: args.description,
+    trigger: args.trigger ?? '',
+    instructions: args.instructions,
+    status: 'pending_review',
+    source: 'ai_generated',
+    aiContext: args.context,
+    createdAt: Date.now(),
+  }
+  await ctx.saveSkill(skill)
+  return {
+    success: true,
+    data: `Skill「${args.name}」已保存为待审批状态，用户在侧边栏确认后生效。`,
+    skillProposal: { skill, context: args.context },
+  }
+}
+
+async function toolEvolveSchema(
+  args: { field_name: string; field_id: string; field_type: string; options?: string; reason: string },
+  ctx: ToolExecuteContext
+): Promise<ToolResult> {
+  if (!ctx.evolveSchema || !ctx.workflowId) return { success: false, error: 'Schema 演进功能未初始化' }
+  const field = {
+    id: args.field_id,
+    name: args.field_name,
+    type: args.field_type as import('./types').WorkspaceFieldType,
+    options: args.options ? args.options.split(',').map((s) => s.trim()) : undefined,
+    aiProposed: true,
+  }
+  await ctx.evolveSchema({
+    workflowId: ctx.workflowId,
+    workflowName: ctx.taskName ?? '当前工作流',
+    field,
+    reason: args.reason,
+  })
+  return {
+    success: true,
+    data: `已向工作流「${ctx.taskName}」添加新字段：${args.field_name}（${args.field_type}）。原因：${args.reason}`,
   }
 }
 
