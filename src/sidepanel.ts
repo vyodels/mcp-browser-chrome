@@ -164,7 +164,7 @@ function buildMemorySection(persistentEntries: MemoryEntry[] = _cachedPersistent
 //   - 内容 < COMPRESS_THRESHOLD：不压缩
 //   - 内容 >= COMPRESS_THRESHOLD：保留头部 HEAD_KEEP + 保留尾部 TAIL_KEEP，压缩中间
 // 两段式保留：头部通常是 URL/标题，尾部通常是可交互元素列表，两者对 AI 最有价值
-const COMPRESS_THRESHOLD = 2000  // 超过此长度才压缩
+const COMPRESS_THRESHOLD = 5000  // 超过此长度才压缩
 const HEAD_KEEP = 800            // 头部保留（URL + 标题 + 主要文本开头）
 const TAIL_KEEP = 600            // 尾部保留（可交互元素列表）
 
