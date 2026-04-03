@@ -1,63 +1,148 @@
-# CLAUDE.md
-
-本文件为 Claude Code (claude.ai/code) 在此代码库中工作时提供指导。
+# CLAUDE_cn.md（仅供人工阅读，非 AI 上下文）
 
 ## 常用命令
 
 ```bash
-npm run dev        # 监听模式构建（用于开发）
-npm run build      # 生产环境构建 → dist/
-npm run typecheck  # 仅进行 TypeScript 类型检查，不输出文件
+npm run dev        # 监听模式构建（开发用）
+npm run build      # 生产构建 → dist/
+npm run typecheck  # TypeScript 类型检查（不输出文件）
 ```
 
-在 Chrome 中加载：进入 `chrome://extensions`，开启开发者模式，点击"加载已解压的扩展程序"，选择 `dist/` 文件夹。
+加载到 Chrome：打开 `chrome://extensions` → 开启开发者模式 → 加载已解压的扩展程序 → 选择 `dist/` 目录。
+
+---
 
 ## 架构
 
-这是一个 Chrome 扩展（Manifest V3），实现了 AI 驱动的浏览器代理。**没有运行时 npm 依赖** —— 纯 TypeScript，通过 Vite 编译。
+Chrome 扩展（Manifest V3），AI 驱动的浏览器自动化助手。**无运行时 npm 依赖**，纯 TypeScript，Vite 编译。
 
-### 四个入口（Vite 多入口构建）
+### 源文件一览
 
-| 入口 | 职责 |
+| 文件 | 职责 |
 |------|------|
-| `src/background.ts` | Service Worker —— 路由侧边栏与 content script 之间的所有消息，处理 ChatGPT session 代理，管理标签页截图 |
-| `src/content.ts` | 注入每个页面 —— 进行 DOM 快照（为可交互元素分配 `@e1`、`@e2`... 引用），执行 AI 动作 |
-| `src/sidepanel.ts` | 侧边栏 UI —— 对话界面、Skills 管理、调试面板 |
-| `src/settings.ts` | 选项页面 —— 认证配置、模型选择、速率限制滑块、已保存的快捷提示词 |
+| `src/background.ts` | Service Worker：消息路由、标签组管理、截图、文件下载 |
+| `src/content.ts` | 注入每个页面：DOM 快照（@e1/@e2 引用）+ 执行动作 |
+| `src/sidepanel.ts` | 侧边栏 UI：Agent Loop 控制、工作流执行、用户介入 UI |
+| `src/settings.ts` | 设置页逻辑 |
+| `src/tools.ts` | 11 个工具定义（JSON Schema）+ 本地执行路由 |
+| `src/workflow.ts` | 工作流数据结构、步骤提示词构建、内置模板 |
+| `src/tabManager.ts` | Chrome TabGroups API 封装 |
+| `src/openai.ts` | AI 客户端：`chat()`（流式）+ `chatWithTools()`（Tool Calling） |
+| `src/types.ts` | 全局类型：Settings、Workflow、LoopState、ToolCallRequest 等 |
+| `src/store.ts` | `chrome.storage.local` 封装，DEFAULT_SETTINGS 含内置工作流 |
+| `src/rateLimit.ts` | 反检测：随机延迟、频率限制、鼠标模拟 |
+
+---
+
+### Agent Loop（核心运行模式）
+
+v2 起不再解析 AI 回复中的 JSON，改用标准 **Tool Calling Loop**：
+
+```
+用户发起任务 → runAgentLoop():
+  while 运行中:
+    chatWithTools(messages, TOOL_DEFINITIONS, settings)
+      → AI 返回 tool_calls（如 get_page_content、click_element）
+    executeTool(name, args, ctx) 逐个执行
+      → 如果是 ask_user：暂停 loop，显示介入 UI，等用户输入
+    把工具结果 push 回 messages
+    重复，直到 AI 不再返回 tool_calls → 任务完成
+```
+
+Loop 状态：`idle → running → (paused | waiting_user) → running → completed / error`
+
+---
+
+### 11 个工具（src/tools.ts）
+
+| 工具名 | 用途 |
+|--------|------|
+| `get_page_content` | 获取页面快照：URL、文本、可交互元素列表 |
+| `click_element` | 点击 @eN 引用的元素（模拟鼠标） |
+| `fill_input` | 逐字符填写输入框 |
+| `navigate_to` | 在目标标签页打开 URL |
+| `scroll_page` | 上/下滚动页面 |
+| `press_key` | 键盘事件（Enter、Tab、Escape 等） |
+| `wait_ms` | 等待指定毫秒（页面加载/动画） |
+| `take_screenshot` | 截图当前可见区域 |
+| `download_data` | 保存数据到 `~/Downloads/browser-agent-files/<任务名>/` |
+| `open_new_tab` | 在 Agent 标签组内打开新标签页 |
+| `ask_user` | **暂停 loop**，向用户提问或请求确认 |
+
+---
+
+### Tool Calling API 格式
+
+**OpenAI 格式：**
+- 请求：附带 `tools: [...]` 数组
+- 响应：解析 `choices[0].message.tool_calls`
+- 工具结果：`{ role: "tool", tool_call_id, content }`
+
+**Anthropic 格式：**
+- 请求：附带 `tools: [...]` 数组
+- 响应：解析 `content[].type === "tool_use"`
+- 工具结果：`{ role: "user", content: [{ type: "tool_result", tool_use_id, content }] }`
+
+两种格式均在 `openai.ts` 的 `chatWithTools()` 中处理。
+
+---
 
 ### 消息总线
 
-所有 IPC 通过 `chrome.runtime.sendMessage` 进行。消息始终按以下方向传递：`侧边栏 → Background → Content Script`（content script 无法直接与侧边栏通信）。
+所有 IPC 路径：`侧边栏 → Background → Content Script`，通过 `chrome.runtime.sendMessage`。
 
-关键消息类型：`GET_PAGE_CONTENT`、`EXECUTE_ACTION`、`DEBUG_DOM`、`TAKE_SCREENSHOT`、`SETTINGS_UPDATED`。
+主要消息类型：
 
-### 双认证模式
+| 消息 | 说明 |
+|------|------|
+| `GET_PAGE_CONTENT` | 获取页面快照 |
+| `EXECUTE_ACTION_IN_TAB` | 执行单个动作（click/fill 等） |
+| `TAKE_SCREENSHOT` | 截图 |
+| `OPEN_TAB` | 在标签组内开新 tab |
+| `CREATE_TAB_GROUP` | 创建命名标签组 |
+| `CLOSE_TAB_GROUP` | 关闭整个标签组 |
+| `DOWNLOAD_DATA` | 通过 chrome.downloads 保存文件 |
+| `GET_ALL_TABS` | 获取当前窗口所有标签页 |
+| `SETTINGS_UPDATED` | 设置页保存后通知侧边栏刷新 |
+| `CONFIGURE_RATE_LIMIT` | 同步速率限制参数到 content script |
 
-- **API Key 模式**：使用用户的 Key 直接调用 `api.openai.com`
-- **ChatGPT session 模式**：Background 静默打开 `chatgpt.com` 标签页，通过 `chrome.scripting.executeScript` 提取 `accessToken`，再用该 token 调用同一 API
+---
 
-### 快照 + 引用系统（`content.ts`）
+### 工作流系统
 
-当侧边栏请求页面内容时，`content.ts` 扫描所有可见的可交互元素（`a[href]`、`button`、`input`、`textarea`、`select`、`[role="button"]`），分配顺序引用 `@e1`、`@e2`...，并返回结构化快照。AI 在其动作 JSON 中使用这些引用。引用是临时的 —— 每次调用快照时重新生成。
+工作流（`Workflow`）= 有序的步骤数组（`WorkflowStep[]`），存储在 `Settings.workflows`（chrome.storage.local）。
 
-### 动作执行流程
+每个步骤包含：
+- `instructions`：作为该步骤的 system message 注入给 AI
+- `intervention`：`none | optional | required`，控制步骤完成后是否暂停等用户确认
+- `completionHint`：AI 判断此步完成的依据
 
-1. 解析 AI 响应中的 JSON 动作数组
-2. 每个动作（`click`、`fill`、`scroll`、`navigate` 等）通过 background 发送给 `content.ts`
-3. Content script 在反检测延迟下执行（随机 800–2500ms、逐字符输入、鼠标模拟）
-4. 每个动作执行后返回新快照；失败时捕获含完整 HTML 的调试快照
+内置两个模板（`store.ts` 中初始化）：
+- **BOSS直聘招聘**（6 步）：筛选候选人 → 发起沟通 → 索简历 → 下载 → 匹配分析 → 预约面试
+- **小红书内容采集**（4 步）：打开首页 → 采集列表 → 查看详情 → 导出 CSV
 
-### 存储结构
+---
 
-所有设置通过 `src/store.ts` 持久化到 `chrome.storage.local`。`src/types.ts` 中的 `Settings` 接口是规范模式 —— 包含 `authMode`、`apiKey`、`model`、`systemPrompt`、`actionDelay`、`maxActionsPerMinute`、`prompts[]`、`skills[]`。
+### 数据存储
 
-### Skills 系统
+| 数据 | 存储方式 |
+|------|----------|
+| 所有设置（含工作流、Skills） | `chrome.storage.local` via `src/store.ts` |
+| 下载文件 | `chrome.downloads` API → `~/Downloads/browser-agent-files/` |
 
-Skills 是存储在 `Settings.skills` 中的用户自定义指令集。当用户输入包含 skill 的 `trigger` 关键词（竖线分隔）时，对应的 `instructions` 会注入到 AI 系统提示中。扩展内置三个默认 Skill：DOM 调试器、智能回复、表单助手。
+---
+
+### 快照 + 引用系统
+
+每次调用 `get_page_content` 时，`content.ts` 扫描页面所有可见可交互元素，分配临时引用 `@e1`、`@e2`...。**引用每次重新生成，不跨快照保留**。AI 在工具参数中用 `@eN` 指定目标元素。
+
+---
 
 ## 关键设计约束
 
-- 扩展要求 Chrome 114+（Side Panel API 最低版本）
-- 仅支持暗色主题；主强调色为 `#10a37f`
-- 所有数据仅本地存储（`chrome.storage.local`）—— 除配置的 AI API 端点外，不向任何服务器发送数据
-- `src/rateLimit.ts` 中的速率限制系统是有意为之的反检测行为 —— 请勿删除或绕过
+- Chrome 114+ 必须（Side Panel API）
+- **Apple 浅色主题**：`#f5f5f7` 背景，`#007aff` 蓝色，`rgba(255,255,255,0.85)` 卡片，`backdrop-filter: blur`
+- 数据全本地：除配置的 AI API 外不发送任何网络请求
+- `src/rateLimit.ts` 反检测逻辑不可删除或绕过
+- 无 ChatGPT session 模式：仅支持 OpenAI 兼容格式和 Anthropic API Key
+- 必要权限：`activeTab, tabs, scripting, storage, sidePanel, desktopCapture, tabGroups, downloads`
