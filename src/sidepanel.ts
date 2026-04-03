@@ -7,7 +7,7 @@ import { chatWithTools } from './openai'
 import { TOOL_DEFINITIONS, executeTool, formatToolResult } from './tools'
 import { createTaskTabGroup, getAllTabs } from './tabManager'
 import { buildStepSystemPrompt } from './workflow'
-import type { Settings, LoopState, InterventionRequest, Workflow, ActivityEntry, ActivityType, CandidateEntry, CandidateStatus, WorkspaceRecord, WorkspaceField, SchemaProposal, Skill } from './types'
+import type { Settings, LoopState, InterventionRequest, Workflow, ActivityEntry, CandidateEntry, CandidateStatus, WorkspaceRecord, WorkspaceField, SchemaProposal, Skill } from './types'
 import type { ToolCallRequest } from './tools'
 
 // ============================================================
@@ -23,8 +23,13 @@ let taskName = '新任务'
 let currentWorkflow: Workflow | null = null
 let currentStepIndex = 0
 let pendingIntervention: ((answer: string) => void) | null = null
-let currentLogFilter: ActivityType | 'all' = 'all'
 let workspaceActiveWfId: string | undefined
+let previousStepSummary = ''    // 上一步 AI 完成时的摘要，注入下一步 system prompt
+let sessionMemory: Record<string, string> = {}  // 会话记忆，跨步骤持久化
+
+// ---- Context 管理参数 ----
+const MAX_LOOP_MESSAGES = 40    // 消息总数上限（超出时丢弃最旧的 tool 对）
+const LARGE_TOOLS = new Set(['get_page_content', 'take_screenshot'])
 
 // ============================================================
 // 消息封装
@@ -71,6 +76,57 @@ function formatContent(text: string): string {
   return paragraphed
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
     .replace(/`(.+?)`/g, '<code>$1</code>')
+}
+
+// ============================================================
+// 会话记忆
+// ============================================================
+function saveMemoryEntry(key: string, value: string) {
+  sessionMemory[key] = value
+}
+
+function buildMemorySection(): string {
+  const entries = Object.entries(sessionMemory)
+  if (entries.length === 0) return ''
+  return `\n## 会话记忆（跨步骤重要信息）\n${entries.map(([k, v]) => `- **${k}**: ${v}`).join('\n')}\n`
+}
+
+// ============================================================
+// 消息队列压缩 + 滑动窗口
+// ============================================================
+function compressForHistory(toolName: string, content: string): string {
+  if (LARGE_TOOLS.has(toolName) && content.length > 600) {
+    return `${content.slice(0, 400)}\n...[${toolName} 结果已截断，原始 ${content.length} 字符]`
+  }
+  return content
+}
+
+function trimLoopMessages() {
+  if (loopMessages.length <= MAX_LOOP_MESSAGES) return
+  // 保留 index 0 (system) + index 1 (initial user)，从 index 2 开始裁剪 tool 交换对
+  let i = 2
+  while (loopMessages.length > MAX_LOOP_MESSAGES && i < loopMessages.length - 4) {
+    const msg = loopMessages[i] as Record<string, unknown>
+    const hasToolCalls = msg.role === 'assistant' && (
+      (Array.isArray(msg.tool_calls) && (msg.tool_calls as unknown[]).length > 0) ||
+      (Array.isArray(msg.content) && (msg.content as Array<{type:string}>).some((c) => c.type === 'tool_use'))
+    )
+    if (hasToolCalls) {
+      // 找到此 assistant 消息后连续的 tool result 消息
+      let j = i + 1
+      while (j < loopMessages.length) {
+        const next = loopMessages[j] as Record<string, unknown>
+        const isResult = next.role === 'tool' ||
+          (next.role === 'user' && Array.isArray(next.content) &&
+           (next.content as Array<{type:string}>)[0]?.type === 'tool_result')
+        if (isResult) j++
+        else break
+      }
+      loopMessages.splice(i, j - i)
+    } else {
+      i++
+    }
+  }
 }
 
 function scrollToBottom() {
@@ -193,34 +249,6 @@ async function addActivityEntry(entry: Omit<ActivityEntry, 'id' | 'timestamp'>) 
   await saveSettings({ activityLog: log })
 }
 
-const ACTIVITY_ICONS: Record<ActivityType, string> = {
-  download: '📥', navigate: '🌐', candidate: '👤', note: '📝',
-}
-
-function renderActivityLog(filter: ActivityType | 'all' = 'all') {
-  loadSettings().then((s) => {
-    const logEl = el('activityLog')
-    const entries = filter === 'all'
-      ? (s.activityLog ?? [])
-      : (s.activityLog ?? []).filter((e) => e.type === filter)
-    if (entries.length === 0) {
-      logEl.innerHTML = '<div class="log-empty">暂无活动记录</div>'
-      return
-    }
-    logEl.innerHTML = entries.map((e) => {
-      const time = new Date(e.timestamp).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
-      return `<div class="log-entry">
-        <span class="log-icon">${ACTIVITY_ICONS[e.type] ?? '📌'}</span>
-        <div class="log-content">
-          <div class="log-title">${escHtml(e.title)}</div>
-          ${e.detail ? `<div class="log-detail">${escHtml(e.detail)}</div>` : ''}
-          ${e.taskName ? `<div class="log-detail" style="color:var(--accent)">${escHtml(e.taskName)}</div>` : ''}
-          <div class="log-time">${time}</div>
-        </div>
-      </div>`
-    }).join('')
-  })
-}
 
 // ============================================================
 // 候选人追踪
@@ -348,6 +376,28 @@ function renderWorkspaceTab(workflow: Workflow) {
   if (sel) sel.value = workflow.id
   renderWorkspaceFilterBar(workflow)
   renderWorkspaceTabFiltered(workflow)
+  renderWorkspaceActivity()
+}
+
+function renderWorkspaceActivity() {
+  const container = el('workspaceActivity')
+  if (!container) return
+  loadSettings().then((s) => {
+    const entries = (s.activityLog ?? []).slice(0, 20)
+    if (entries.length === 0) {
+      container.innerHTML = '<div class="log-empty" style="padding:16px 0;font-size:11px">暂无活动记录</div>'
+      return
+    }
+    const ICONS: Record<string, string> = { download: '📥', navigate: '🌐', candidate: '👤', note: '📝' }
+    container.innerHTML = entries.map((e) => {
+      const time = new Date(e.timestamp).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+      return `<div class="activity-row">
+        <span class="activity-icon">${ICONS[e.type] ?? '📌'}</span>
+        <span class="activity-title">${escHtml(e.title)}</span>
+        <span class="activity-time">${time}</span>
+      </div>`
+    }).join('')
+  })
 }
 
 function getStatusColor(field: WorkspaceField | undefined, value: string | undefined): string {
@@ -377,6 +427,8 @@ async function runAgentLoop(initialUserMessage?: string) {
       upsertWorkspaceRecord(wfId ?? 'general', recordId, data),
     saveSkill: saveAiSkill,
     evolveSchema: addWorkspaceField,
+    saveMemory: saveMemoryEntry,
+    runSubAgent: (task: string, context: string) => runSubAgentLoop(task, context, ctx),
   }
 
   if (initialUserMessage) {
@@ -414,6 +466,9 @@ async function runAgentLoop(initialUserMessage?: string) {
 
       // 无 tool calls → 任务完成（或 AI 在等待）
       if (response.toolCalls.length === 0) {
+        // 保存步骤摘要（用于下一步 system prompt 注入）
+        previousStepSummary = assistantText.slice(0, 600)
+
         // 工作流：检查是否进入下一步
         if (currentWorkflow && currentStepIndex < currentWorkflow.steps.length - 1) {
           const prevStep = currentWorkflow.steps[currentStepIndex]
@@ -429,6 +484,8 @@ async function runAgentLoop(initialUserMessage?: string) {
             // 自动进入下一步
             const nextStep = currentWorkflow.steps[currentStepIndex]
             const newSystemPrompt = buildStepSystemPrompt(nextStep, currentWorkflow, currentStepIndex, settings.skills)
+              + buildMemorySection()
+              + (previousStepSummary ? `\n## 上一步完成摘要\n${previousStepSummary}\n` : '')
             loopMessages = [
               { role: 'system', content: newSystemPrompt },
               { role: 'user', content: `请执行：${nextStep.name}` },
@@ -478,14 +535,16 @@ async function runAgentLoop(initialUserMessage?: string) {
 }
 
 function pushToolResult(toolCall: ToolCallRequest, content: string) {
+  const stored = compressForHistory(toolCall.name, content)
   if (settings.apiFormat === 'anthropic') {
     loopMessages.push({
       role: 'user',
-      content: [{ type: 'tool_result', tool_use_id: toolCall.id, content }],
+      content: [{ type: 'tool_result', tool_use_id: toolCall.id, content: stored }],
     })
   } else {
-    loopMessages.push({ role: 'tool', tool_call_id: toolCall.id, name: toolCall.name, content })
+    loopMessages.push({ role: 'tool', tool_call_id: toolCall.id, name: toolCall.name, content: stored })
   }
+  trimLoopMessages()
 }
 
 function formatToolArgs(args: Record<string, unknown>): string {
@@ -565,6 +624,8 @@ async function startWorkflow(wf: Workflow) {
   currentStepIndex = 0
   taskName = wf.name
   loopMessages = []
+  previousStepSummary = ''
+  sessionMemory = {}   // 新工作流重置会话记忆
 
   switchTab('chat')
   updateWorkflowProgress()
@@ -611,11 +672,97 @@ async function startWorkflow(wf: Workflow) {
 
   const firstStep = wf.steps[0]
   loopMessages = [
-    { role: 'system', content: buildStepSystemPrompt(firstStep, wf, 0, settings.skills) },
+    { role: 'system', content: buildStepSystemPrompt(firstStep, wf, 0, settings.skills) + buildMemorySection() },
     { role: 'user', content: `请开始执行第一步：${firstStep.name}` },
   ]
 
   await runAgentLoop()
+}
+
+// ============================================================
+// 子代理循环（独立上下文，不影响主循环 loopMessages）
+// ============================================================
+async function runSubAgentLoop(
+  task: string,
+  context: string,
+  parentCtx: Parameters<typeof executeTool>[2]
+): Promise<string> {
+  const subSystemPrompt = `${settings.systemPrompt}\n\n## 子任务背景\n${context}${buildMemorySection()}`
+  const subMessages: object[] = [
+    { role: 'system', content: subSystemPrompt },
+    { role: 'user', content: task },
+  ]
+
+  appendMessage('system', `🤖 子代理启动: ${task.slice(0, 80)}`, { isLog: true })
+
+  const abortCtrl = loopAbortController ?? new AbortController()
+  let finalText = ''
+  let iterations = 0
+  const MAX_SUB_ITER = 30
+
+  while (iterations < MAX_SUB_ITER && !abortCtrl.signal.aborted) {
+    iterations++
+    const response = await chatWithTools(subMessages, TOOL_DEFINITIONS, settings)
+    const assistantText = response.content
+
+    if (response.toolCalls.length === 0) {
+      finalText = assistantText
+      break
+    }
+
+    if (settings.apiFormat === 'openai' && response.toolCalls.length > 0) {
+      subMessages.push({
+        role: 'assistant',
+        content: assistantText,
+        tool_calls: response.toolCalls.map((tc) => ({
+          id: tc.id, type: 'function',
+          function: { name: tc.name, arguments: JSON.stringify(tc.arguments) },
+        })),
+      })
+    } else {
+      subMessages.push({ role: 'assistant', content: assistantText })
+    }
+
+    for (const toolCall of response.toolCalls) {
+      if (abortCtrl.signal.aborted) break
+
+      appendMessage('system', `  ↳ [子代理] ${toolCall.name}(${formatToolArgs(toolCall.arguments)})`, { isLog: true })
+
+      const result = await executeTool(toolCall.name, toolCall.arguments, parentCtx)
+
+      let resultText: string
+      if (result.interventionRequest) {
+        setLoopState('waiting_user')
+        const answer = await showIntervention(result.interventionRequest)
+        setLoopState('running')
+        resultText = answer
+      } else {
+        resultText = formatToolResult(result)
+        if (result.screenshotDataUrl) {
+          appendMessage('assistant', '📸 [子代理截图]', { imageDataUrl: result.screenshotDataUrl })
+        }
+        if (toolCall.name === 'log_record' && currentWorkflow) {
+          renderWorkspaceTab(currentWorkflow)
+        }
+      }
+
+      const compressed = compressForHistory(toolCall.name, resultText)
+      if (settings.apiFormat === 'anthropic') {
+        subMessages.push({ role: 'user', content: [{ type: 'tool_result', tool_use_id: toolCall.id, content: compressed }] })
+      } else {
+        subMessages.push({ role: 'tool', tool_call_id: toolCall.id, name: toolCall.name, content: compressed })
+      }
+
+      // 子消息窗口裁剪
+      if (subMessages.length > MAX_LOOP_MESSAGES) {
+        subMessages.splice(2, 2)  // 删除最旧的 tool 交换对
+      }
+    }
+  }
+
+  const summary = finalText || '子代理已完成任务（无文本输出）'
+  appendMessage('system', `🤖 子代理完成: ${summary.slice(0, 100)}`, { isLog: true })
+  return summary
 }
 
 function updateWorkflowProgress() {
@@ -744,7 +891,6 @@ function switchTab(tab: string) {
   document.querySelectorAll<HTMLElement>('.tab-panel').forEach((panel) => {
     panel.style.display = panel.dataset.tab === tab ? 'flex' : 'none'
   })
-  if (tab === 'log') renderActivityLog(currentLogFilter)
   if (tab === 'workspace') refreshWorkspaceTab()
 }
 
@@ -779,19 +925,9 @@ async function init() {
     })
   })
 
-  // 活动记录过滤
-  document.querySelectorAll<HTMLButtonElement>('.filter-btn').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      document.querySelectorAll<HTMLButtonElement>('.filter-btn').forEach((b) => b.classList.remove('active'))
-      btn.classList.add('active')
-      currentLogFilter = (btn.dataset.filter ?? 'all') as ActivityType | 'all'
-      renderActivityLog(currentLogFilter)
-    })
-  })
-
-  el('clearLogBtn')?.addEventListener('click', async () => {
-    await saveSettings({ activityLog: [] })
-    renderActivityLog(currentLogFilter)
+  // 设置标签页按钮（CSP-safe，不用 onclick）
+  el('openSettingsBtn')?.addEventListener('click', () => {
+    chrome.runtime.sendMessage({ type: 'OPEN_SETTINGS' })
   })
 
   // 初始加载 tab 选择器
@@ -808,8 +944,11 @@ async function init() {
   el('btnStart').addEventListener('click', async () => {
     if (loopState === 'paused' && currentWorkflow) {
       const nextStep = currentWorkflow.steps[currentStepIndex]
+      const resumeSystemPrompt = buildStepSystemPrompt(nextStep, currentWorkflow, currentStepIndex, settings.skills)
+        + buildMemorySection()
+        + (previousStepSummary ? `\n## 上一步完成摘要\n${previousStepSummary}\n` : '')
       loopMessages = [
-        { role: 'system', content: buildStepSystemPrompt(nextStep, currentWorkflow, currentStepIndex, settings.skills) },
+        { role: 'system', content: resumeSystemPrompt },
         { role: 'user', content: `请继续执行：${nextStep.name}` },
       ]
       await runAgentLoop()
@@ -835,6 +974,8 @@ async function init() {
     loopMessages = []
     currentWorkflow = null
     currentStepIndex = 0
+    previousStepSummary = ''
+    sessionMemory = {}
     el('workflowProgress').style.display = 'none'
     setLoopState('idle')
     appendMessage('assistant', '⏹ 任务已停止')
@@ -872,6 +1013,11 @@ async function init() {
 
   // 设置页按钮
   el('settingsBtn').addEventListener('click', () => {
+    chrome.runtime.sendMessage({ type: 'OPEN_SETTINGS' })
+  })
+
+  // 工作流管理按钮（跳转到设置页）
+  el('manageWorkflowsBtn')?.addEventListener('click', () => {
     chrome.runtime.sendMessage({ type: 'OPEN_SETTINGS' })
   })
 

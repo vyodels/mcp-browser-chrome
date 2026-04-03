@@ -276,6 +276,42 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
     },
   },
   {
+    name: 'save_memory',
+    description: '保存关键信息到会话记忆。记忆在整个任务执行期间持续有效，并注入每一步的 system prompt，让你在步骤切换后仍能访问关键决策和背景。适合保存：候选人决策列表、已完成事项汇总、重要配置、跨步骤需要记住的信息。',
+    parameters: {
+      type: 'object',
+      properties: {
+        key: {
+          type: 'string',
+          description: '记忆键名，简洁英文，如 candidate_decisions、completed_steps、important_findings',
+        },
+        value: {
+          type: 'string',
+          description: '要记忆的内容，建议简洁（<200字），如"张三-通过(8分), 李四-淘汰(技术不匹配), 王五-待定"',
+        },
+      },
+      required: ['key', 'value'],
+    },
+  },
+  {
+    name: 'run_sub_agent',
+    description: '启动子代理执行一个独立的子任务。子代理拥有独立上下文，可使用所有工具，完成后返回结果摘要。主要用于：处理单个候选人的完整沟通流程、执行独立的数据采集任务等。子代理完成后，主代理继续工作。',
+    parameters: {
+      type: 'object',
+      properties: {
+        task: {
+          type: 'string',
+          description: '子代理的具体任务，越详细越好。如"与候选人张三进行完整的初步沟通：查看其聊天页、发送个性化消息、记录沟通结果到 log_record"',
+        },
+        context: {
+          type: 'string',
+          description: '子代理需要的背景信息，如候选人数据、工作流要求、当前状态等。这是子代理的初始上下文，它不能访问主代理的历史对话。',
+        },
+      },
+      required: ['task', 'context'],
+    },
+  },
+  {
     name: 'evolve_schema',
     description: '当当前工作流的数据字段不足以记录关键信息时，提议添加新字段到工作区 schema。字段会立即生效，用户可在设置页审核。每次最多提议一个字段。',
     parameters: {
@@ -330,6 +366,10 @@ export interface ToolExecuteContext {
   evolveSchema?: (proposal: SchemaProposal) => Promise<void>
   // 当前工作流 ID（用于 log_record 和 evolve_schema）
   workflowId?: string
+  // 会话记忆写入
+  saveMemory?: (key: string, value: string) => void
+  // 启动子代理执行独立子任务
+  runSubAgent?: (task: string, context: string) => Promise<string>
 }
 
 // ---- 工具执行结果 ----
@@ -385,6 +425,10 @@ export async function executeTool(
         return await toolSaveSkill(args as { name: string; description: string; trigger?: string; instructions: string; context: string }, ctx)
       case 'evolve_schema':
         return await toolEvolveSchema(args as { field_name: string; field_id: string; field_type: string; options?: string; reason: string }, ctx)
+      case 'save_memory':
+        return toolSaveMemory(args as { key: string; value: string }, ctx)
+      case 'run_sub_agent':
+        return await toolRunSubAgent(args as { task: string; context: string }, ctx)
       default:
         return { success: false, error: `未知工具: ${name}` }
     }
@@ -645,6 +689,18 @@ async function toolEvolveSchema(
     success: true,
     data: `已向工作流「${ctx.taskName}」添加新字段：${args.field_name}（${args.field_type}）。原因：${args.reason}`,
   }
+}
+
+function toolSaveMemory(args: { key: string; value: string }, ctx: ToolExecuteContext): ToolResult {
+  if (!ctx.saveMemory) return { success: false, error: '会话记忆功能未初始化' }
+  ctx.saveMemory(args.key, args.value)
+  return { success: true, data: `已保存记忆 [${args.key}]: ${args.value.slice(0, 50)}${args.value.length > 50 ? '...' : ''}` }
+}
+
+async function toolRunSubAgent(args: { task: string; context: string }, ctx: ToolExecuteContext): Promise<ToolResult> {
+  if (!ctx.runSubAgent) return { success: false, error: '子代理功能未初始化' }
+  const result = await ctx.runSubAgent(args.task, args.context)
+  return { success: true, data: result }
 }
 
 // ---- 格式化 tool result 为 LLM 可读字符串 ----

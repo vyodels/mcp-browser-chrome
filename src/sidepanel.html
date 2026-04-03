@@ -511,6 +511,26 @@
     .log-detail { font-size: 11px; color: var(--text2); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .log-time { font-size: 10px; color: var(--text3); margin-top: 3px; }
 
+    /* ---- 工作区活动区 ---- */
+    .workspace-activity-section {
+      border-top: 1px solid var(--border-light);
+      padding: 8px 10px;
+      flex-shrink: 0;
+    }
+    .workspace-activity-heading {
+      font-size: 10px; font-weight: 600; color: var(--text3);
+      text-transform: uppercase; letter-spacing: 0.4px; margin-bottom: 6px;
+    }
+    .workspace-activity-list { display: flex; flex-direction: column; gap: 3px; }
+    .activity-row {
+      display: flex; align-items: center; gap: 6px;
+      font-size: 11px; color: var(--text2);
+      padding: 2px 0;
+    }
+    .activity-icon { font-size: 12px; flex-shrink: 0; }
+    .activity-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .activity-time { font-size: 10px; color: var(--text3); flex-shrink: 0; }
+
     /* ---- 设置面板 ---- */
     .settings-panel {
       flex: 1; overflow-y: auto; padding: 16px;
@@ -551,7 +571,6 @@
   <button class="tab-btn active" data-tab="chat">💬 对话</button>
   <button class="tab-btn" data-tab="workflow">⚡ 工作流</button>
   <button class="tab-btn" data-tab="workspace">🗂 工作区</button>
-  <button class="tab-btn" data-tab="log">📋 记录</button>
   <button class="tab-btn" data-tab="settings-tab">⚙️ 设置</button>
 </div>
 
@@ -605,28 +624,11 @@
 <!-- 工作流标签 -->
 <div class="tab-panel" data-tab="workflow">
   <div class="workflow-panel">
-    <div class="panel-heading">预设工作流</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:2px">
+      <div class="panel-heading">工作流</div>
+      <button id="manageWorkflowsBtn" style="height:26px;padding:0 12px;border:1px solid var(--accent);border-radius:13px;font-size:11px;color:var(--accent);background:none;cursor:pointer;font-family:var(--font)">⚙ 管理</button>
+    </div>
     <div id="workflowList"></div>
-  </div>
-</div>
-
-<!-- 侧边栏工具链状态（全局，悬浮在工作流tab上） -->
-
-<!-- 记录标签 -->
-<div class="tab-panel" data-tab="log">
-  <div class="log-panel">
-    <div class="log-toolbar">
-      <div class="log-filters">
-        <button class="filter-btn active" data-filter="all">全部</button>
-        <button class="filter-btn" data-filter="download">📥 下载</button>
-        <button class="filter-btn" data-filter="navigate">🌐 页面</button>
-        <button class="filter-btn" data-filter="candidate">👤 候选人</button>
-      </div>
-      <button class="clear-log-btn" id="clearLogBtn">清空</button>
-    </div>
-    <div class="log-list" id="activityLog">
-      <div class="log-empty">暂无活动记录</div>
-    </div>
   </div>
 </div>
 
@@ -644,6 +646,11 @@
     <div class="cand-list" id="workspaceRecords">
       <div class="workspace-empty">请在左侧选择工作流，执行后记录会自动出现。</div>
     </div>
+    <!-- 活动记录（折叠区） -->
+    <div class="workspace-activity-section">
+      <div class="workspace-activity-heading">最近活动</div>
+      <div id="workspaceActivity" class="workspace-activity-list"></div>
+    </div>
   </div>
 </div>
 
@@ -654,7 +661,7 @@
       <h3>API 配置</h3>
       <p>在完整设置页中配置 API Key、Base URL、模型和系统提示词。</p>
     </div>
-    <button class="open-settings-btn" onclick="chrome.runtime.sendMessage({type:'OPEN_SETTINGS'})">
+    <button class="open-settings-btn" id="openSettingsBtn">
       打开设置页面 →
     </button>
     <div class="settings-card">
