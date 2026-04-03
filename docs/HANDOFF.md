@@ -122,52 +122,30 @@ Stored in `chrome.storage.local` under `Settings.skills`. Each skill has:
 
 ---
 
-## 6. Current Next Task: Tab Targeting + URL Navigation
+## 6. Next Task: Recruiting Agent Redesign
 
-**In progress.** Plan file: `/Users/vyodels/.claude/plans/curious-yawning-turing.md`
+**In planning.** Plan file: `~/.claude/plans/curious-yawning-turing.md`
 
-### Problem
-The sidepanel always routes to `{ active: true, currentWindow: true }` — unreliable when the sidebar itself has focus. No way to navigate to a URL from within the sidepanel.
+### Design direction
+Transform from "chat assistant" → "task execution engine" for recruiting automation.
 
-### What's being built
-- `targetTabId` state in sidepanel — explicit tab targeting
-- Tab indicator bar: favicon + title + 🎯 lock / ✕ unlock buttons
-- URL navigation bar: input + → button to navigate without leaving sidepanel
-- `resolveTab(targetTabId?)` helper in `background.ts` — all 4 handlers use it
-- `GET_ACTIVE_TAB` new message type
+**Key changes:**
+- Replace Skills system with explicit Task Definitions (name, criteria, message template, data fields)
+- Add `taskRunner.ts` — autonomous think→act→observe loop
+- Add `collector.ts` — IndexedDB data collection + CSV export
+- Redesign sidepanel UI: 💬对话 | 🎯任务 | 📊数据 | 🔧调试
+- Remove tab lock UI (just added on 2026-04-03 — confirmed wrong approach)
+- Fix page parsing: `chrome.scripting.executeScript` fallback injection
 
-### Files touched
-`src/types.ts`, `src/background.ts`, `src/sidepanel.html`, `src/sidepanel.ts`
-
----
-
-## 7. Upcoming Task: Data Collection System
-
-**Not started.** After tab targeting is complete.
-
-**Decisions:**
-1. **Fields**: AI auto-extracts by default; Skill-defined fields take priority
-2. **Storage**: IndexedDB
-3. **Export**: JSON + CSV local download
-4. **Trigger**: Always user-controlled (button or chat), never automatic
-
-**Suggested plan:**
-- `src/collector.ts` — `CollectedRecord` type, IndexedDB read/write, JSON/CSV export
-- `src/types.ts` — add `CollectedRecord` interface
-- `src/sidepanel.html` — new "📊 数据" tab panel
-- `src/sidepanel.ts` — wire up collector + export buttons
-
-```typescript
-interface CollectedRecord {
-  id: string
-  timestamp: number
-  pageUrl: string
-  pageTitle: string
-  fields: Record<string, string>
-  rawText?: string
-  skillUsed?: string
-}
-```
+**8 tasks (none started yet):**
+1. Fix page parsing (scripting fallback)
+2. Add TaskDefinition + CollectedRecord types
+3. Task storage in store.ts
+4. New: `src/collector.ts`
+5. New: `src/taskRunner.ts`
+6. Redesign `src/sidepanel.html`
+7. Rewrite `src/sidepanel.ts`
+8. Simplify `src/background.ts`
 
 ---
 
