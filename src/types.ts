@@ -127,6 +127,7 @@ export type MessageType =
   | 'WAIT_FOR_ELEMENT'
   | 'WAIT_FOR_TEXT'
   | 'WAIT_FOR_DISAPPEAR'
+  | 'BROWSER_SNAPSHOT'
 
 export interface Message {
   type: MessageType

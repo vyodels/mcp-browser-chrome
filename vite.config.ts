@@ -11,8 +11,6 @@ export default defineConfig({
       input: {
         background: resolve(__dirname, 'src/background.ts'),
         content: resolve(__dirname, 'src/content.ts'),
-        sidepanel: resolve(__dirname, 'src/sidepanel.html'),
-        settings: resolve(__dirname, 'src/settings.html'),
       },
       output: {
         entryFileNames: '[name].js',

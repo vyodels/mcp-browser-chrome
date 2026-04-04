@@ -6,7 +6,10 @@
   "scripts": {
     "dev": "vite build --watch",
     "build": "vite build",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "mcp:start": "node mcp/server.mjs",
+    "native-host:start": "node native-host/host.mjs",
+    "native-host:install": "node scripts/install-native-host.mjs"
   },
   "devDependencies": {
     "@types/chrome": "^0.0.268",
