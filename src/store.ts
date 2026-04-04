@@ -82,6 +82,8 @@ export const DEFAULT_SETTINGS: Settings = {
   candidates: [],
   workspaceRecords: [],
   memoryEntries: [],
+  maxConcurrentAgents: 10,
+  subAgentTimeoutMs: 86400000,   // 24 小时
 }
 
 export async function loadSettings(): Promise<Settings> {
@@ -96,6 +98,8 @@ export async function loadSettings(): Promise<Settings> {
       if (!merged.candidates) merged.candidates = []
       if (!merged.workspaceRecords) merged.workspaceRecords = []
       if (!merged.memoryEntries) merged.memoryEntries = []
+      if (!merged.maxConcurrentAgents) merged.maxConcurrentAgents = 10
+      if (!merged.subAgentTimeoutMs) merged.subAgentTimeoutMs = 86400000
       resolve(merged)
     })
   })

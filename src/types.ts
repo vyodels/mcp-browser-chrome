@@ -66,7 +66,9 @@ export interface Settings {
   activityLog: ActivityEntry[]
   candidates: CandidateEntry[]
   workspaceRecords: WorkspaceRecord[]
-  memoryEntries: MemoryEntry[]   // Layer 1 持久记忆
+  memoryEntries: MemoryEntry[]         // Layer 1 持久记忆
+  maxConcurrentAgents: number          // 最大并发子 agent 数（默认 10）
+  subAgentTimeoutMs: number            // 子 agent 超时（ms，默认 24h）
 }
 
 export interface SavedPrompt {
