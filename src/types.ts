@@ -123,6 +123,10 @@ export type MessageType =
   | 'CLOSE_TAB_GROUP'
   | 'DOWNLOAD_DATA'
   | 'GET_ALL_TABS'
+  | 'QUERY_ELEMENTS'
+  | 'WAIT_FOR_ELEMENT'
+  | 'WAIT_FOR_TEXT'
+  | 'WAIT_FOR_DISAPPEAR'
 
 export interface Message {
   type: MessageType

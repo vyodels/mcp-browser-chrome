@@ -1,5 +1,365 @@
 # GPT Browser Agent — 完整产品需求提示词
 
+## 20260404（v3 隐蔽优先架构，进行中）
+
+### 新的核心定位
+
+项目目标调整为：
+
+- 不再把本项目继续做成“扩展内置 AI Agent + 工作流平台”
+- 改为做一套 **隐蔽优先、MCP 优先、接近 Chrome MCP 的浏览器能力底座**
+- 浏览器扩展只负责真实浏览器能力执行，不承载复杂业务编排
+- 本地 **MCP Server** 负责把这些能力暴露给 Codex / LLM
+- 具体业务流程（招聘、采集、表单处理、沟通流程）放在 Codex 侧完成
+
+新的整体链路：
+
+```text
+Codex / LLM
+    ↓ MCP
+Local MCP Server
+    ↓ Native Messaging
+Chrome Extension
+    ↓
+Background / Content Script
+    ↓
+Real Web Page (shared login/session)
+```
+
+---
+
+### 为什么选 Native Messaging
+
+本项目的首要目标之一，是降低被网页侧反爬虫 / 反自动化机制感知到“外部自动化系统正在驱动浏览器”的概率。
+
+因此，扩展与本地 MCP Server 的通信方式，优先选择：
+
+- **Chrome Extension Native Messaging**
+
+而不是：
+
+- 本地 HTTP Server
+- 本地 WebSocket Server
+- 页面内桥接脚本 + `window.postMessage`
+
+选择 Native Messaging 的原因：
+
+1. 页面 JS 无法直接探测本地开放端口
+2. 不暴露 `localhost` / `127.0.0.1` / `ws://` / `http://` 等典型辅助进程特征
+3. 没有对页面可见的网络握手、长连接、轮询等痕迹
+4. 通信链路完全位于浏览器扩展与本地宿主之间，更接近浏览器内部能力
+5. 更适合后续长期产品化和稳定运行
+
+注意：
+
+- Native Messaging 能显著降低“桥接层被探测”的风险
+- 但它 **不能保证绝对不可发现**
+- 真正更容易暴露的，往往不是本地桥接，而是页面内的执行痕迹、事件链异常和环境污染
+
+---
+
+### 哪些实现方式绝不能用
+
+以下实现方式与“隐蔽优先”目标冲突，默认禁止：
+
+1. **不允许使用本地 HTTP / WebSocket 服务作为扩展桥接主通道**
+   - 不允许扩展通过 `http://127.0.0.1:*` 与本地 MCP 服务通信
+   - 不允许扩展通过 `ws://127.0.0.1:*` 与本地 MCP 服务通信
+
+2. **不允许在页面主世界长期注入桥接脚本**
+   - 不允许把 MCP 协议对象挂载到 `window`
+   - 不允许暴露诸如 `window.__MCP__`、`window.__AGENT__` 等调试对象
+   - 不允许通过 `CustomEvent` / `postMessage` 暴露控制协议
+
+3. **不允许污染页面全局环境**
+   - 不允许修改页面原生对象原型链
+   - 不允许持久改写 `fetch` / `XMLHttpRequest` / `addEventListener` / `console`
+   - 不允许为调试方便向页面插入可见 overlay / badge / helper DOM
+
+4. **不允许默认高频全量扫描 DOM**
+   - 不允许每个动作前都重新做一次大范围全文快照
+   - 不允许默认抓取超长 HTML 或全量文本
+   - 页面读取必须分层：snapshot → query → debug
+
+5. **不允许把业务流程固化在扩展内**
+   - 不继续在扩展内维护招聘工作流、采集工作流、子代理、技能自动沉淀等上层逻辑
+   - 扩展只保留浏览器能力，不承载业务智能体
+
+---
+
+### 内容脚本如何做低痕执行
+
+扩展执行原则：
+
+1. **优先使用 content script isolated world**
+   - 主要逻辑运行在扩展隔离环境中
+   - 默认不向页面主 world 注入执行脚本
+
+2. **仅在需要时做最小交互**
+   - 先读页面，再局部定位，再执行操作
+   - 失败时才进入 debug 模式
+   - 不能一上来就做大规模 DOM 读取
+
+3. **事件链必须尽量接近真人**
+   - click 不能只调用 `.click()`
+   - 应尽量补齐 `pointerover` / `mouseover` / `mousemove` / `pointerdown` / `mousedown` / `focus` / `pointerup` / `mouseup` / `click`
+   - fill 不能只做 `el.value = x`
+   - 应使用原生 setter，并触发 `input` / `change` / `blur`
+
+4. **操作节奏必须反规律化**
+   - 随机延迟必须存在，但不能机械化
+   - 滚动距离、输入间隔、点击前停顿需要可配置随机化
+   - 不能固定“每步 400px 滚动”或“每次间隔 1000ms”
+
+5. **默认只暴露必要快照**
+   - 页面文本限制长度
+   - 交互元素限制数量
+   - HTML 仅在 debug 模式或失败上下文中返回
+
+6. **显式等待优于盲等**
+   - 优先 `wait_for_element` / `wait_for_text` / `wait_for_navigation`
+   - 减少简单 `sleep` 风格等待
+
+7. **不要依赖页面可见的控制通道**
+   - 不通过 DOM 属性或隐藏节点传输内部状态
+   - 不通过页面 console 输出调试日志
+
+---
+
+### MCP 工具如何设计成默认低暴露模式
+
+MCP 工具设计原则：
+
+1. **工具分层，不走“大一统万能工具”**
+   - `tabs/navigation`
+   - `snapshot/query`
+   - `interaction`
+   - `wait`
+   - `capture/files`
+
+2. **默认模式是最小读取**
+   - `browser_snapshot` 返回精简信息
+   - `browser_query_elements` 返回局部元素结果
+   - `browser_debug_dom` 只在必要时调用
+
+3. **交互工具支持多种定位方式**
+   - `ref`
+   - `selector`
+   - `text`
+   - `role`
+   - `index`
+
+4. **工具返回结构化结果，不只返回字符串**
+   - 结果需包含执行目标、是否成功、是否触发导航、简化后的页面状态
+   - 便于 Codex 基于结果继续推理，而不是重复抓整页
+
+5. **默认不截图**
+   - `browser_screenshot` 应为显式工具
+   - 不作为常规读取手段
+   - 截图仅用于视觉确认、复杂页面排障、记录结果
+
+6. **默认不抓完整 HTML**
+   - 全量 DOM / HTML 视为调试级工具
+   - 必须与正常 snapshot 工具分离
+
+---
+
+### 新的能力边界
+
+#### 扩展内保留的能力
+
+- 标签页识别与切换
+- 页面导航
+- 页面快照
+- 元素查询
+- 点击 / 悬停 / 输入 / 清空 / 选择 / 滚动 / 按键
+- 显式等待
+- 截图
+- 文件下载
+- 基础风控节奏控制
+
+#### 从扩展中移出的能力
+
+- 扩展内置 LLM 对话主循环
+- 工作流引擎
+- 招聘 / 小红书等业务模板
+- 子代理系统
+- 持久记忆和会话记忆系统
+- Skill 自动沉淀与审批流
+- 候选人 CRM / 工作区 schema 系统
+
+这些能力后续统一放在 Codex / 外部调用侧，由 MCP 工具组合实现。
+
+---
+
+### 目标架构
+
+#### 1. Chrome Extension
+
+职责：
+
+- 提供真实浏览器执行能力
+- 共享用户本地浏览器登录态
+- 通过 Background + Content Script 执行页面操作
+- 通过 Native Messaging 与本地宿主通信
+
+内部拆分建议：
+
+```text
+src/extension/
+  background/
+    router.ts
+    tabs.ts
+    capture.ts
+    downloads.ts
+    nativeHost.ts
+  content/
+    snapshot.ts
+    query.ts
+    actions.ts
+    waits.ts
+    locators.ts
+  shared/
+    protocol.ts
+    types.ts
+```
+
+#### 2. Local MCP Server
+
+职责：
+
+- 暴露标准 MCP tools 给 Codex
+- 转发工具调用到 Chrome Native Host
+- 管理调用上下文和返回结构
+- 不承担业务编排和页面策略判断
+
+目录建议：
+
+```text
+mcp/
+  server.ts
+  bridge/
+    nativeMessagingClient.ts
+  tools/
+    tabs.ts
+    navigation.ts
+    snapshot.ts
+    query.ts
+    actions.ts
+    waits.ts
+    capture.ts
+    files.ts
+```
+
+---
+
+### P0 工具集合（第一阶段必须完成）
+
+#### Tabs / Navigation
+
+- `browser_list_tabs`
+- `browser_get_active_tab`
+- `browser_select_tab`
+- `browser_open_tab`
+- `browser_close_tab`
+- `browser_navigate`
+- `browser_go_back`
+- `browser_reload`
+
+#### Snapshot / Query
+
+- `browser_snapshot`
+- `browser_query_elements`
+- `browser_get_element`
+- `browser_debug_dom`
+
+#### Interaction
+
+- `browser_click`
+- `browser_hover`
+- `browser_fill`
+- `browser_clear`
+- `browser_select_option`
+- `browser_press_key`
+- `browser_scroll`
+
+#### Wait
+
+- `browser_wait`
+- `browser_wait_for_element`
+- `browser_wait_for_text`
+- `browser_wait_for_navigation`
+- `browser_wait_for_disappear`
+
+#### Capture / Files
+
+- `browser_screenshot`
+- `browser_download_file`
+- `browser_save_text`
+- `browser_save_json`
+- `browser_save_csv`
+
+---
+
+### Tool 设计约束
+
+所有交互类工具建议统一支持以下定位参数：
+
+- `tabId`
+- `ref`
+- `selector`
+- `text`
+- `role`
+- `index`
+- `timeoutMs`
+
+定位优先级建议：
+
+1. `ref`
+2. `selector`
+3. `text + role`
+4. `text`
+
+返回值必须尽量结构化，至少包含：
+
+- `success`
+- `tabId`
+- `target`
+- `navigationDetected`
+- `snapshotSummary`
+- `error`（失败时）
+
+---
+
+### 第一阶段验收标准
+
+以下能力跑通，才算进入可用状态：
+
+1. Codex 能稳定枚举并选择浏览器标签页
+2. 能读取页面快照而不依赖截图
+3. 能通过 `ref / selector / text` 三种方式定位并操作元素
+4. 能通过显式 wait 工具稳定等待页面变化
+5. 能在真实登录态页面上执行多步骤流程
+6. 能把结果保存到本地文件
+7. 整个链路不依赖 localhost HTTP / WebSocket
+
+---
+
+### 第一条真实验证流程（建议）
+
+先不要从招聘全流程切入，先用更小的验收闭环：
+
+1. 打开指定页面
+2. 定位搜索框
+3. 输入关键词
+4. 等待结果列表出现
+5. 提取前 10 条标题和链接
+6. 保存为 JSON 文件
+
+如果这条流程稳定通过，再进入招聘、沟通、简历处理等更复杂场景。
+
+---
+
 ## 项目背景
 
 开发一个类似 Anthropic「Claude for Chrome」的 Chrome 浏览器插件，核心思路是：
