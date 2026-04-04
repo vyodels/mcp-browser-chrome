@@ -6,7 +6,7 @@ import { createDefaultWorkflows } from './workflow'
 
 export const DEFAULT_SETTINGS: Settings = {
   baseUrl: 'http://127.0.0.1:8317/v1',
-  apiKey: '',
+  apiKey: 'your-api-key-1',
   apiFormat: 'openai',
   model: 'gpt-5.4',
   systemPrompt: `你是一个浏览器自动化助手，通过工具调用来完成网页操作任务。
