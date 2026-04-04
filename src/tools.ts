@@ -560,12 +560,12 @@ async function toolGetPageContent(ctx: ToolExecuteContext): Promise<ToolResult> 
   // 如果 background 解析出了实际 tabId，锁定到该标签
   if (resp.tabId && !ctx.targetTabId) ctx.targetTabId = resp.tabId
   const snap = resp.snapshot!
-  const elements = snap.interactiveElements.slice(0, 50).map((el) =>
+  const elements = snap.interactiveElements.slice(0, 30).map((el) =>
     `${el.ref} [${el.tag}${el.type ? `(${el.type})` : ''}]${el.text ? ` "${el.text.slice(0, 60)}"` : ''}${el.placeholder ? ` placeholder="${el.placeholder}"` : ''}${el.href ? ` href="${el.href.slice(0, 80)}"` : ''}`
   ).join('\n')
   return {
     success: true,
-    data: `URL: ${snap.url}\n标题: ${snap.title}\n\n页面文本:\n${snap.text.slice(0, 3000)}\n\n可交互元素:\n${elements}`,
+    data: `URL: ${snap.url}\n标题: ${snap.title}\n\n页面文本:\n${snap.text.slice(0, 2000)}\n\n可交互元素:\n${elements}`,
   }
 }
 
