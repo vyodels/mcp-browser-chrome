@@ -3,7 +3,7 @@
 // ============================================================
 import { loadSettings, saveSettings } from './store'
 import { TOOL_DEFINITIONS } from './tools'
-import type { SavedPrompt, ApiFormat, Workflow, WorkflowStep, InterventionType, Skill, SkillStatus } from './types'
+import type { SavedPrompt, ApiFormat, Workflow, WorkflowStep, InterventionType, Skill, SkillStatus } from '../types'
 
 let allSkills: Skill[] = []
 

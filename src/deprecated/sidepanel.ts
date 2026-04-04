@@ -7,7 +7,7 @@ import { chatWithTools } from './openai'
 import { TOOL_DEFINITIONS, executeTool, formatToolResult } from './tools'
 import { createTaskTabGroup, getAllTabs } from './tabManager'
 import { buildStepSystemPrompt } from './workflow'
-import type { Settings, LoopState, InterventionRequest, Workflow, ActivityEntry, CandidateEntry, CandidateStatus, WorkspaceRecord, WorkspaceField, SchemaProposal, Skill, MemoryEntry } from './types'
+import type { Settings, LoopState, InterventionRequest, Workflow, ActivityEntry, CandidateEntry, CandidateStatus, WorkspaceRecord, WorkspaceField, SchemaProposal, Skill, MemoryEntry } from '../types'
 import type { ToolCallRequest } from './tools'
 
 // ============================================================

@@ -1,7 +1,7 @@
 // ============================================================
 // workflow.ts — 工作流数据结构和执行辅助
 // ============================================================
-import type { Workflow, WorkflowStep, Skill, WorkspaceField } from './types'
+import type { Workflow, WorkflowStep, Skill, WorkspaceField } from '../types'
 
 export type { Workflow, WorkflowStep }
 

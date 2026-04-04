@@ -2,7 +2,7 @@
 // openai.ts — AI 客户端，支持 OpenAI 兼容格式和 Anthropic 格式
 // 包含基础 chat 和 Tool Calling 两种模式
 // ============================================================
-import type { ChatMessage, Settings } from './types'
+import type { ChatMessage, Settings } from '../types'
 import type { ToolDefinition, ToolCallRequest } from './tools'
 
 export interface CompletionOptions {

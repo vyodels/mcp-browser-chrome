@@ -3,7 +3,7 @@
 // LLM 通过 function/tool calling API 调用这些工具
 // 工具定义在本地，LLM 调用通过远程 OpenAI/Anthropic API
 // ============================================================
-import type { PageSnapshot, AgentAction, InterventionRequest, ActivityEntry, CandidateEntry, CandidateStatus, SchemaProposal, Skill, Workflow, WorkspaceField, InterventionType, WorkspaceRecord } from './types'
+import type { PageSnapshot, AgentAction, InterventionRequest, ActivityEntry, CandidateEntry, CandidateStatus, SchemaProposal, Skill, Workflow, WorkspaceField, InterventionType, WorkspaceRecord } from '../types'
 
 // Re-export for use by openai.ts and sidepanel.ts
 export type { ToolCallRequest } from './types'

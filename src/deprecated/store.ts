@@ -1,7 +1,7 @@
 // ============================================================
 // store.ts — chrome.storage 封装，统一读写设置
 // ============================================================
-import type { Settings } from './types'
+import type { Settings } from '../types'
 import { createDefaultWorkflows } from './workflow'
 
 export const DEFAULT_SETTINGS: Settings = {

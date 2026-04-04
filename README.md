@@ -69,6 +69,12 @@ scripts/
   install-native-host.mjs
 ```
 
+更详细的目录职责、MCP 核心模块、非核心遗留模块见：
+
+- [docs/repo-structure.md](/Users/vyodels/AgentProjects/mcp-browser-chrome/docs/repo-structure.md)
+
+旧侧边栏 Agent / workflow 代码已归档到 `src/deprecated/`，不参与主路径和类型检查。
+
 ---
 
 ## 安装与构建

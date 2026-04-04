@@ -14,5 +14,8 @@
   },
   "include": ["src/**/*",
     "src/skills/**/*"
+  ],
+  "exclude": [
+    "src/deprecated/**/*"
   ]
 }
