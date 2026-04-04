@@ -347,6 +347,28 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
     },
   },
   {
+    name: 'test_step',
+    description: '在当前浏览器页面上实测一个工作流步骤。创建工作流时，设计完每一步后先调用此工具验证指令是否可行，根据测试结果再决定是否保留或修改该步骤。测试由子代理执行，不影响主创建流程。',
+    parameters: {
+      type: 'object',
+      properties: {
+        step_name: {
+          type: 'string',
+          description: '步骤名称，如"批量筛选候选人"',
+        },
+        instructions: {
+          type: 'string',
+          description: '步骤的完整执行指令，与工作流步骤中 instructions 字段内容相同',
+        },
+        completion_hint: {
+          type: 'string',
+          description: '步骤的完成判定条件',
+        },
+      },
+      required: ['step_name', 'instructions', 'completion_hint'],
+    },
+  },
+  {
     name: 'list_records',
     description: '查看当前工作流工作区中已有的所有数据记录。批量处理候选人/数据前先调用此工具，可知道哪些已处理过，避免重复。',
     parameters: {
@@ -511,6 +533,8 @@ export async function executeTool(
         return await toolDeleteMemory(args as { key: string; layer: string }, ctx)
       case 'run_sub_agent':
         return await toolRunSubAgent(args as { task: string; context: string }, ctx)
+      case 'test_step':
+        return await toolTestStep(args as { step_name: string; instructions: string; completion_hint: string }, ctx)
       case 'list_records':
         return await toolListRecords(args as { status_filter?: string }, ctx)
       case 'create_workflow':
@@ -814,6 +838,37 @@ async function toolRunSubAgent(args: { task: string; context: string }, ctx: Too
   if (!ctx.runSubAgent) return { success: false, error: '子代理功能未初始化' }
   const result = await ctx.runSubAgent(args.task, args.context)
   return { success: true, data: result }
+}
+
+async function toolTestStep(
+  args: { step_name: string; instructions: string; completion_hint: string },
+  ctx: ToolExecuteContext
+): Promise<ToolResult> {
+  if (!ctx.runSubAgent) return { success: false, error: '步骤测试功能未初始化' }
+
+  const task = `【步骤测试】请严格按照以下指令执行，然后详细报告结果。
+
+步骤名称：${args.step_name}
+完成判定：${args.completion_hint}
+
+执行指令：
+${args.instructions}
+
+执行完成后，必须报告：
+1. ✅/❌ 步骤是否成功执行
+2. 页面上实际找到了什么（元素、内容、数据）
+3. 执行过程中遇到了什么问题（如有）
+4. 针对本步骤指令的改进建议（如有）
+
+注意：这是测试模式，遇到需要发消息/提交等敏感操作时，直接报告"此处需要执行 XXX"而不实际执行，避免产生真实影响。`
+
+  const context = `这是工作流步骤测试，只需验证指令的可行性。遇到登录、验证码等障碍时调用 ask_user 让用户处理。`
+
+  const result = await ctx.runSubAgent(task, context)
+  return {
+    success: true,
+    data: `📋 步骤「${args.step_name}」测试完成：\n\n${result}`,
+  }
 }
 
 async function toolListRecords(args: { status_filter?: string }, ctx: ToolExecuteContext): Promise<ToolResult> {
