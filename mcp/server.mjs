@@ -5,8 +5,8 @@ import os from 'node:os'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 
-const SOCKET_PATH = process.env.MCP_BROWSER_CHROME_SOCKET || path.join(os.tmpdir(), 'mcp-browser-chrome.sock')
-const SERVER_INFO = { name: 'mcp-browser-chrome', version: '1.0.0' }
+const SOCKET_PATH = process.env.MCP_BROWSER_CHROME_SOCKET || path.join(os.tmpdir(), 'browser-mcp.sock')
+const SERVER_INFO = { name: 'browser-mcp', version: '1.0.0' }
 const PROTOCOL_VERSION = '2024-11-05'
 
 const TOOLS = [
@@ -196,4 +196,3 @@ async function handleMessage(message) {
 }
 
 process.stdin.on('data', extractMessages)
-

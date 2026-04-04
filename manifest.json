@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "GPT Browser Agent",
+  "name": "browser-mcp",
   "version": "1.0.0",
-  "description": "AI-powered browser agent: sidebar chat, page control, skills, anti-detection",
+  "description": "Stealth-first Chrome browser MCP runtime",
   "permissions": [
     "activeTab",
     "tabs",
@@ -19,7 +19,7 @@
     "type": "module"
   },
   "action": {
-    "default_title": "GPT Browser Agent",
+    "default_title": "browser-mcp",
     "default_icon": {
       "16": "icons/icon16.png",
       "48": "icons/icon48.png",

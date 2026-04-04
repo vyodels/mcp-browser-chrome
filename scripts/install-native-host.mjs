@@ -21,15 +21,15 @@ const manifestDir = process.platform === 'darwin'
 mkdirSync(manifestDir, { recursive: true })
 chmodSync(hostScript, 0o755)
 
-const manifest = {
-  name: 'com.vyodels.mcp_browser_chrome',
-  description: 'Native messaging host for mcp-browser-chrome',
+  const manifest = {
+  name: 'com.vyodels.browser_mcp',
+  description: 'Native messaging host for browser-mcp',
   path: hostScript,
   type: 'stdio',
   allowed_origins: [`chrome-extension://${extensionId}/`],
 }
 
-const manifestPath = path.join(manifestDir, 'com.vyodels.mcp_browser_chrome.json')
+const manifestPath = path.join(manifestDir, 'com.vyodels.browser_mcp.json')
 writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`)
 
 console.log(`Installed native host manifest at ${manifestPath}`)

@@ -6,7 +6,7 @@ import { existsSync, rmSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 
-const SOCKET_PATH = process.env.MCP_BROWSER_CHROME_SOCKET || path.join(os.tmpdir(), 'mcp-browser-chrome.sock')
+const SOCKET_PATH = process.env.MCP_BROWSER_CHROME_SOCKET || path.join(os.tmpdir(), 'browser-mcp.sock')
 
 const pending = new Map()
 let nativeBuffer = Buffer.alloc(0)
@@ -121,4 +121,3 @@ for (const signal of ['SIGINT', 'SIGTERM']) {
     })
   })
 }
-

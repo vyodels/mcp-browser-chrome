@@ -1,4 +1,4 @@
-# MCP Browser Chrome
+# browser-mcp
 
 隐蔽优先的 Chrome 浏览器执行底座。
 
@@ -105,15 +105,15 @@ npm run native-host:install -- --extension-id=<your-extension-id>
 
 这会在本机 Chrome Native Messaging Hosts 目录下生成：
 
-- `com.vyodels.mcp_browser_chrome.json`
+- `com.vyodels.browser_mcp.json`
 
 默认 host 名称：
 
-- `com.vyodels.mcp_browser_chrome`
+- `com.vyodels.browser_mcp`
 
 默认本地 socket：
 
-- `/tmp/mcp-browser-chrome.sock`
+- `/tmp/browser-mcp.sock`
 
 可通过环境变量覆盖：
 
