@@ -93,6 +93,14 @@ export async function loadSettings(): Promise<Settings> {
       const merged = { ...DEFAULT_SETTINGS, ...saved }
       // 确保 workflows 字段存在（升级兼容）
       if (!merged.workflows?.length) merged.workflows = createDefaultWorkflows()
+      // 升级兼容：确保内置默认工作流的 workspace schema 不丢失
+      // （旧版本存储的工作流可能没有 workspace 字段，需从最新默认值中补回）
+      const defaultWfs = createDefaultWorkflows()
+      merged.workflows = merged.workflows.map((wf) => {
+        if (wf.workspace?.fields?.length) return wf  // 已有 workspace，不覆盖
+        const dflt = defaultWfs.find((d) => d.id === wf.id)
+        return dflt?.workspace ? { ...wf, workspace: dflt.workspace } : wf
+      })
       // 确保 activityLog 字段存在（升级兼容）
       if (!merged.activityLog) merged.activityLog = []
       if (!merged.candidates) merged.candidates = []
