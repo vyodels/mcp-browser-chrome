@@ -8,7 +8,7 @@ export const DEFAULT_SETTINGS: Settings = {
   baseUrl: 'https://api.openai.com/v1',
   apiKey: '',
   apiFormat: 'openai',
-  model: 'gpt-4o-mini',
+  model: 'gpt-5.4',
   systemPrompt: `你是一个浏览器自动化助手，通过工具调用来完成网页操作任务。
 
 你拥有的工具能力：

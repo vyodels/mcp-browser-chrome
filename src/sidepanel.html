@@ -648,7 +648,10 @@
   <div class="workflow-panel">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:2px">
       <div class="panel-heading">工作流</div>
-      <button id="manageWorkflowsBtn" style="height:26px;padding:0 12px;border:1px solid var(--accent);border-radius:13px;font-size:11px;color:var(--accent);background:none;cursor:pointer;font-family:var(--font)">⚙ 管理</button>
+      <div style="display:flex;gap:6px">
+        <button id="btnCreateWorkflowAi" style="height:26px;padding:0 12px;border:1px solid #30d158;border-radius:13px;font-size:11px;color:#30d158;background:none;cursor:pointer;font-family:var(--font)">✨ AI 创建</button>
+        <button id="manageWorkflowsBtn" style="height:26px;padding:0 12px;border:1px solid var(--accent);border-radius:13px;font-size:11px;color:var(--accent);background:none;cursor:pointer;font-family:var(--font)">⚙ 管理</button>
+      </div>
     </div>
     <div id="workflowList"></div>
   </div>
@@ -664,7 +667,7 @@
       </select>
     </div>
     <!-- 工作流 schema 状态字段过滤（动态生成） -->
-    <div id="workspaceFilterBar" style="display:none;padding:6px 10px;border-bottom:1px solid var(--border-light);display:flex;gap:4px;flex-wrap:wrap;flex-shrink:0"></div>
+    <div id="workspaceFilterBar" style="display:none;padding:6px 10px;border-bottom:1px solid var(--border-light);gap:4px;flex-wrap:wrap;flex-shrink:0"></div>
     <div class="cand-list" id="workspaceRecords">
       <div class="workspace-empty">请在左侧选择工作流，执行后记录会自动出现。</div>
     </div>

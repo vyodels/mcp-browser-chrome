@@ -3,7 +3,7 @@
 // LLM 通过 function/tool calling API 调用这些工具
 // 工具定义在本地，LLM 调用通过远程 OpenAI/Anthropic API
 // ============================================================
-import type { PageSnapshot, AgentAction, InterventionRequest, ActivityEntry, CandidateEntry, CandidateStatus, SchemaProposal, Skill } from './types'
+import type { PageSnapshot, AgentAction, InterventionRequest, ActivityEntry, CandidateEntry, CandidateStatus, SchemaProposal, Skill, Workflow, WorkspaceField, InterventionType, WorkspaceRecord } from './types'
 
 // Re-export for use by openai.ts and sidepanel.ts
 export type { ToolCallRequest } from './types'
@@ -347,6 +347,41 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
     },
   },
   {
+    name: 'list_records',
+    description: '查看当前工作流工作区中已有的所有数据记录。批量处理候选人/数据前先调用此工具，可知道哪些已处理过，避免重复。',
+    parameters: {
+      type: 'object',
+      properties: {
+        status_filter: {
+          type: 'string',
+          description: '可选：按状态字段值过滤记录，如"已沟通"、"筛选中"',
+        },
+      },
+    },
+  },
+  {
+    name: 'create_workflow',
+    description: '创建并保存一个新的自动化工作流。收集完用户需求后调用此工具。',
+    parameters: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: '工作流名称，简洁明了' },
+        description: { type: 'string', description: '一句话描述工作流用途' },
+        context: { type: 'string', description: '全局背景信息，如岗位要求、采集目标等，每步都会注入' },
+        start_url: { type: 'string', description: '起始URL（可选）' },
+        steps: {
+          type: 'string',
+          description: 'JSON数组，格式：[{"name":"步骤名","instructions":"详细指令","intervention":"none|optional|required","completionHint":"完成判定"}]',
+        },
+        workspace_fields: {
+          type: 'string',
+          description: '工作区字段定义JSON数组（可选）：[{"id":"field_id","name":"显示名","type":"text|status|number|date|tags|url","options":["选项1","选项2"],"required":true}]',
+        },
+      },
+      required: ['name', 'description', 'steps'],
+    },
+  },
+  {
     name: 'evolve_schema',
     description: '当当前工作流的数据字段不足以记录关键信息时，提议添加新字段到工作区 schema。字段会立即生效，用户可在设置页审核。每次最多提议一个字段。',
     parameters: {
@@ -407,6 +442,10 @@ export interface ToolExecuteContext {
   deleteMemory?: (key: string, layer: 'session' | 'persistent') => Promise<void> | void
   // 启动子代理执行独立子任务
   runSubAgent?: (task: string, context: string) => Promise<string>
+  // 创建新工作流
+  createWorkflow?: (workflow: Workflow) => Promise<void>
+  // 读取工作区记录
+  listRecords?: (statusFilter?: string) => Promise<WorkspaceRecord[]>
 }
 
 // ---- 工具执行结果 ----
@@ -470,6 +509,10 @@ export async function executeTool(
         return await toolDeleteMemory(args as { key: string; layer: string }, ctx)
       case 'run_sub_agent':
         return await toolRunSubAgent(args as { task: string; context: string }, ctx)
+      case 'list_records':
+        return await toolListRecords(args as { status_filter?: string }, ctx)
+      case 'create_workflow':
+        return await toolCreateWorkflow(args as { name: string; description: string; context?: string; start_url?: string; steps: string; workspace_fields?: string }, ctx)
       default:
         return { success: false, error: `未知工具: ${name}` }
     }
@@ -764,6 +807,55 @@ async function toolRunSubAgent(args: { task: string; context: string }, ctx: Too
   if (!ctx.runSubAgent) return { success: false, error: '子代理功能未初始化' }
   const result = await ctx.runSubAgent(args.task, args.context)
   return { success: true, data: result }
+}
+
+async function toolListRecords(args: { status_filter?: string }, ctx: ToolExecuteContext): Promise<ToolResult> {
+  if (!ctx.listRecords) return { success: false, error: '记录查询功能未初始化' }
+  const records = await ctx.listRecords(args.status_filter)
+  if (records.length === 0) {
+    return { success: true, data: args.status_filter ? `没有状态为「${args.status_filter}」的记录。` : '当前工作流暂无记录，这是第一批处理。' }
+  }
+  const lines = records.slice(0, 100).map((r) => {
+    const fields = Object.entries(r.data).map(([k, v]) => `${k}:${v}`).join(', ')
+    return `  [id:${r.id}] ${fields}`
+  })
+  const suffix = records.length > 100 ? `\n  ...（共 ${records.length} 条，仅显示前 100 条）` : ''
+  return { success: true, data: `工作区已有 ${records.length} 条记录：\n${lines.join('\n')}${suffix}` }
+}
+
+async function toolCreateWorkflow(
+  args: { name: string; description: string; context?: string; start_url?: string; steps: string; workspace_fields?: string },
+  ctx: ToolExecuteContext
+): Promise<ToolResult> {
+  if (!ctx.createWorkflow) return { success: false, error: '创建工作流功能未初始化' }
+  let rawSteps: Array<{ name: string; instructions: string; intervention?: string; completionHint?: string }>
+  try {
+    rawSteps = JSON.parse(args.steps)
+  } catch {
+    return { success: false, error: `steps 参数必须是合法 JSON 数组，解析失败：${args.steps.slice(0, 100)}` }
+  }
+  const workspaceFields: WorkspaceField[] = args.workspace_fields
+    ? (() => { try { return JSON.parse(args.workspace_fields!) } catch { return [] } })()
+    : []
+
+  const workflow: Workflow = {
+    id: `wf-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    name: args.name,
+    description: args.description,
+    context: args.context,
+    startUrl: args.start_url,
+    workspace: workspaceFields.length > 0 ? { fields: workspaceFields } : undefined,
+    steps: rawSteps.map((s) => ({
+      id: Math.random().toString(36).slice(2, 10),
+      name: s.name,
+      instructions: s.instructions,
+      intervention: (['none', 'optional', 'required'].includes(s.intervention ?? '') ? s.intervention : 'optional') as InterventionType,
+      completionHint: s.completionHint ?? '步骤任务已完成',
+    })),
+    createdAt: Date.now(),
+  }
+  await ctx.createWorkflow(workflow)
+  return { success: true, data: `工作流「${args.name}」已创建成功，共 ${workflow.steps.length} 个步骤。可在工作流列表中查看并运行。` }
 }
 
 // ---- 格式化 tool result 为 LLM 可读字符串 ----

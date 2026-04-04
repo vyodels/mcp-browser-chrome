@@ -397,6 +397,54 @@ async function addWorkspaceField(proposal: SchemaProposal): Promise<void> {
   appendMessage('system', `🔧 AI 提议新字段「${proposal.field.name}」已添加到工作流「${proposal.workflowName}」`, { isLog: true })
 }
 
+async function saveNewWorkflow(wf: Workflow): Promise<void> {
+  const s = await loadSettings()
+  await saveSettings({ workflows: [...s.workflows, wf] })
+  settings.workflows = [...settings.workflows, wf]
+  renderWorkflowList()
+  refreshWorkspaceSelector()
+}
+
+async function listWorkspaceRecords(statusFilter?: string): Promise<WorkspaceRecord[]> {
+  const s = await loadSettings()
+  const wfId = currentWorkflow?.id
+  let records = (s.workspaceRecords ?? []).filter((r) => !wfId || r.workflowId === wfId)
+  if (statusFilter) {
+    const statusFieldId = currentWorkflow?.workspace?.fields.find((f) => f.type === 'status')?.id
+    if (statusFieldId) {
+      records = records.filter((r) => r.data[statusFieldId] === statusFilter)
+    }
+  }
+  return records
+}
+
+// 系统提示词：AI 引导用户创建工作流
+const WORKFLOW_CREATOR_SYSTEM_PROMPT = `你是一个工作流设计专家，帮助用户为浏览器自动化创建合适的工作流。
+
+你的任务：
+1. 通过 ask_user 工具分步骤了解用户需求（每次只问一个问题，不要一次全问）
+2. 根据需求设计工作流步骤和数据字段
+3. 调用 create_workflow 工具保存工作流
+
+询问顺序（逐步展开，根据回答决定是否需要追问）：
+1. 要在哪个网站/平台上自动化？主要做什么事？
+2. 需要记录/收集哪些数据？（如候选人信息、帖子内容、商品价格等）
+3. 有哪些关键操作需要在执行前让你确认？（如发消息、提交表单）
+4. 大概需要几个步骤？每步的目标是什么？
+
+数据字段设计规则：
+- 字段 id 使用英文/拼音（如 name、status、salary）
+- 必须包含一个 status 字段，枚举值覆盖完整生命周期
+- type 可选: text / status / number / date / tags / url
+
+步骤设计规则：
+- 第一步通常是"打开页面/确认登录"
+- intervention 设置：required=每步必须用户确认；optional=可跳过；none=全自动
+- 关键操作（发消息、提交等）步骤 intervention 设为 required
+- completionHint 写清楚 AI 什么时候应该停止这一步
+
+收集完信息后，调用 create_workflow 工具创建，无需再次询问用户确认。`
+
 async function saveAiSkill(skill: Skill): Promise<void> {
   const s = await loadSettings()
   const skills = [skill, ...(s.skills ?? [])]
@@ -557,6 +605,8 @@ async function runAgentLoop(initialUserMessage?: string) {
     listMemory: listMemorySnapshot,
     deleteMemory: deleteMemoryEntry,
     runSubAgent: (task: string, context: string) => runSubAgentLoop(task, context, ctx),
+    createWorkflow: saveNewWorkflow,
+    listRecords: listWorkspaceRecords,
   }
 
   if (initialUserMessage) {
@@ -650,6 +700,11 @@ async function runAgentLoop(initialUserMessage?: string) {
           // 工作区数据变化时刷新
           if (toolCall.name === 'log_record' && currentWorkflow) {
             renderWorkspaceTab(currentWorkflow)
+          }
+          // 新工作流创建后刷新工作流列表
+          if (toolCall.name === 'create_workflow') {
+            renderWorkflowList()
+            refreshWorkspaceSelector()
           }
           pushToolResult(toolCall, resultText)
         }
@@ -963,12 +1018,17 @@ function refreshWorkspaceSelector() {
 function refreshWorkspaceTab() {
   refreshWorkspaceSelector()
   renderMemoryPanel()   // 无论选哪个工作流都刷新记忆面板
-  const wfId = workspaceActiveWfId ?? currentWorkflow?.id
+  const sel = el<HTMLSelectElement>('workspaceWfSelector')
+  let wfId = workspaceActiveWfId ?? currentWorkflow?.id
+  // 没有活跃工作流时，自动选中下拉框中第一个可用工作流
+  if (!wfId && sel && sel.options.length > 1) {
+    wfId = sel.options[1].value
+    workspaceActiveWfId = wfId
+  }
   if (!wfId) return
   const wf = settings.workflows.find((w) => w.id === wfId)
   if (wf) {
-    const sel = el<HTMLSelectElement>('workspaceWfSelector')
-    if (sel && !sel.value) sel.value = wfId
+    if (sel && sel.value !== wfId) sel.value = wfId
     renderWorkspaceFilterBar(wf)
     renderWorkspaceTab(wf)
   }
@@ -1187,6 +1247,26 @@ async function init() {
   // 工作流管理按钮（跳转到设置页）
   el('manageWorkflowsBtn')?.addEventListener('click', () => {
     chrome.runtime.sendMessage({ type: 'OPEN_SETTINGS' })
+  })
+
+  // AI 创建工作流
+  el('btnCreateWorkflowAi')?.addEventListener('click', async () => {
+    if (loopState === 'running' || loopState === 'waiting_user') {
+      appendMessage('assistant', '⚠️ 当前有任务正在执行，请先停止后再创建工作流。')
+      switchTab('chat')
+      return
+    }
+    loopAbortController?.abort()
+    currentWorkflow = null
+    currentStepIndex = 0
+    previousStepSummary = ''
+    sessionMemory = {}
+    taskName = 'AI 创建工作流'
+    loopMessages = [{ role: 'system', content: WORKFLOW_CREATOR_SYSTEM_PROMPT }]
+    el('workflowProgress').style.display = 'none'
+    switchTab('chat')
+    // AI 立刻开始提问（会通过 ask_user 工具与用户对话）
+    await runAgentLoop('请帮我创建一个浏览器自动化工作流')
   })
 
   // 工作区工作流选择器
