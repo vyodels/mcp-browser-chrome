@@ -18,7 +18,15 @@ function resolveTab(targetTabId?: number): Promise<chrome.tabs.Tab | null> {
   if (targetTabId) {
     return chrome.tabs.get(targetTabId).catch(() => null)
   }
-  return chrome.tabs.query({ active: true, currentWindow: true }).then((tabs) => tabs[0] ?? null)
+  return chrome.tabs.query({ active: true, currentWindow: true }).then((tabs) => {
+    const active = tabs[0]
+    // 活跃标签可注入则直接用
+    if (active && canInjectContentScript(active.url)) return active
+    // 否则找窗口内第一个 http/https 标签作为 fallback
+    return chrome.tabs.query({ currentWindow: true }).then((all) => {
+      return all.find((t) => canInjectContentScript(t.url)) ?? active ?? null
+    })
+  })
 }
 
 function canInjectContentScript(url?: string): boolean {
@@ -84,6 +92,9 @@ async function relayToContentScript<T>(
   if (!injected.success) {
     return injected
   }
+
+  // 注入后稍等内容脚本初始化完成
+  await new Promise((r) => setTimeout(r, 300))
 
   const secondTry = await sendTabMessage<T>(tab.id, payload)
   if (secondTry.ok) {

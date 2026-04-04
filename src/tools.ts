@@ -528,8 +528,11 @@ async function toolGetPageContent(ctx: ToolExecuteContext): Promise<ToolResult> 
     success: boolean
     snapshot?: PageSnapshot
     error?: string
+    tabId?: number
   }
   if (!resp.success) return { success: false, error: resp.error ?? '获取页面失败' }
+  // 如果 background 解析出了实际 tabId，锁定到该标签
+  if (resp.tabId && !ctx.targetTabId) ctx.targetTabId = resp.tabId
   const snap = resp.snapshot!
   const elements = snap.interactiveElements.slice(0, 50).map((el) =>
     `${el.ref} [${el.tag}${el.type ? `(${el.type})` : ''}]${el.text ? ` "${el.text.slice(0, 60)}"` : ''}${el.placeholder ? ` placeholder="${el.placeholder}"` : ''}${el.href ? ` href="${el.href.slice(0, 80)}"` : ''}`

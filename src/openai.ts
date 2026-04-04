@@ -113,9 +113,12 @@ async function callOpenAIWithTools(
 
   if (!resp.ok) {
     const err = await resp.json().catch(() => ({}))
-    throw new Error(
-      `API 错误: ${(err as { error?: { message?: string } }).error?.message ?? resp.statusText}`
-    )
+    const errMsg = (err as { error?: { message?: string } }).error?.message ?? resp.statusText
+    // 流式请求失败（EOF / 连接断开），降级为非流式重试
+    if (onChunk && (errMsg.includes('EOF') || errMsg.includes('stream') || errMsg.includes('connection'))) {
+      return callOpenAIWithTools(messages, tools, model, baseUrl, apiKey, undefined)
+    }
+    throw new Error(`API 错误: ${errMsg}`)
   }
 
   if (onChunk) {
