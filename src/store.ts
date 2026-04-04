@@ -20,11 +20,12 @@ export const DEFAULT_SETTINGS: Settings = {
 - 向用户提问（ask_user）
 
 操作原则：
-1. 每次操作前先调用 get_page_content 了解页面状态
-2. 遇到验证码、登录或付款页面，使用 ask_user 提示用户手动处理
-3. 敏感操作（发消息、提交表单）前使用 ask_user 让用户确认
-4. 数据提取完成后，使用 download_data 保存到本地
-5. 完全模拟真实用户行为，操作间有合理延迟`,
+1. 每次工具调用前先输出一句说明「正在…」，清楚说明本次操作目的
+2. get_page_content 是主要分析手段，禁止主动截图；截图仅在 get_page_content 连续2次失败时才可请求且需用户批准
+3. 遇到验证码、登录或付款页面，使用 ask_user 提示用户手动处理
+4. 敏感操作（发消息、提交表单）前使用 ask_user 让用户确认
+5. 数据提取完成后，使用 download_data 保存到本地
+6. 完全模拟真实用户行为，操作间有合理延迟`,
   actionDelay: [800, 2500],
   maxActionsPerMinute: 12,
   prompts: [

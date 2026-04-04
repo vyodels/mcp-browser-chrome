@@ -131,7 +131,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
   },
   {
     name: 'take_screenshot',
-    description: '截取当前标签页可见区域的截图，返回图像供视觉分析。当页面状态难以用文本描述清楚时使用。',
+    description: '⚠️ 截图是最后手段，仅在 get_page_content 连续失败或完全无法解析页面时才可调用。调用后会弹出用户确认，用户拒绝则截图不会执行。请优先通过 get_page_content 和 scroll_page 分析页面。',
     parameters: {
       type: 'object',
       properties: {},
@@ -456,6 +456,8 @@ export interface ToolResult {
   error?: string
   // ask_user 工具返回此字段，表示需要等待用户输入
   interventionRequest?: InterventionRequest
+  // take_screenshot 两阶段：true = 等用户确认后由 loop 实际执行截图
+  pendingScreenshot?: boolean
   // take_screenshot 返回的图像
   screenshotDataUrl?: string
   // AI 提议新 Skill（待审批）
@@ -616,14 +618,16 @@ async function toolWaitMs(args: { ms: string }, _ctx: ToolExecuteContext): Promi
   return { success: true, data: `已等待 ${ms}ms` }
 }
 
-async function toolTakeScreenshot(ctx: ToolExecuteContext): Promise<ToolResult> {
-  const resp = await ctx.sendMsg({ type: 'TAKE_SCREENSHOT', targetTabId: ctx.targetTabId }) as {
-    success: boolean
-    dataUrl?: string
-    error?: string
+// 截图需要用户明确同意，由 loop 层实际执行（两阶段）
+function toolTakeScreenshot(_ctx: ToolExecuteContext): ToolResult {
+  return {
+    success: true,
+    pendingScreenshot: true,
+    interventionRequest: {
+      question: '📷 AI 请求截图分析页面。\n\n截图仅应在 get_page_content 完全无法解析页面时使用。是否允许？',
+      options: ['允许截图', '不需要，用文字继续'],
+    },
   }
-  if (!resp.success) return { success: false, error: resp.error ?? '截图失败' }
-  return { success: true, data: '截图已获取', screenshotDataUrl: resp.dataUrl }
 }
 
 async function toolDownloadData(

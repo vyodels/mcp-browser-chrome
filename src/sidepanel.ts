@@ -689,8 +689,26 @@ async function runAgentLoop(initialUserMessage?: string) {
           setLoopState('waiting_user')
           const answer = await showIntervention(result.interventionRequest)
           setLoopState('running')
-          appendMessage('user', answer)
-          pushToolResult(toolCall, answer)
+
+          // take_screenshot 两阶段：用户同意后才真正截图
+          if (result.pendingScreenshot) {
+            if (answer === '允许截图') {
+              const ssResp = await sendMsg({ type: 'TAKE_SCREENSHOT', targetTabId: ctx.targetTabId }) as {
+                success: boolean; dataUrl?: string; error?: string
+              }
+              if (ssResp.success && ssResp.dataUrl) {
+                appendMessage('assistant', '📸 截图', { imageDataUrl: ssResp.dataUrl })
+                pushToolResult(toolCall, '截图已获取，请分析图像内容后继续。')
+              } else {
+                pushToolResult(toolCall, `截图失败: ${ssResp.error ?? '未知错误'}。请改用 get_page_content 或 ask_user。`)
+              }
+            } else {
+              pushToolResult(toolCall, '用户拒绝截图。请通过 get_page_content + scroll_page 分析页面，或用 ask_user 让用户描述当前画面。')
+            }
+          } else {
+            appendMessage('user', answer)
+            pushToolResult(toolCall, answer)
+          }
         } else {
           const resultText = formatToolResult(result)
           appendMessage('system', resultText.slice(0, 300), { isLog: true, isError: !result.success })
