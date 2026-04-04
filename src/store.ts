@@ -5,7 +5,7 @@ import type { Settings } from './types'
 import { createDefaultWorkflows } from './workflow'
 
 export const DEFAULT_SETTINGS: Settings = {
-  baseUrl: 'https://api.openai.com/v1',
+  baseUrl: 'http://127.0.0.1:8317/v1',
   apiKey: '',
   apiFormat: 'openai',
   model: 'gpt-5.4',
