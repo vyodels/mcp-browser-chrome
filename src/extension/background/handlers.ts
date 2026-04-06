@@ -332,13 +332,19 @@ async function executeBrowserCommand(command: BrowserCommand): Promise<unknown> 
 }
 
 export function registerBackgroundHandlers() {
-  createNativeHostBridge(executeBrowserCommand).start()
+  const nativeHostBridge = createNativeHostBridge(executeBrowserCommand)
+  nativeHostBridge.start()
 
   // Ensure the MV3 service worker is woken on browser startup/install so the native bridge can connect.
-  chrome.runtime.onStartup.addListener(() => {})
-  chrome.runtime.onInstalled.addListener(() => {})
+  chrome.runtime.onStartup.addListener(() => nativeHostBridge.start())
+  chrome.runtime.onInstalled.addListener(() => nativeHostBridge.start())
+  chrome.tabs.onActivated.addListener(() => nativeHostBridge.start())
+  chrome.tabs.onUpdated.addListener(() => nativeHostBridge.start())
+  chrome.windows.onFocusChanged.addListener(() => nativeHostBridge.start())
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    nativeHostBridge.start()
+
     switch (message.type) {
       case 'CONTENT_SCRIPT_READY':
         sendResponse({ success: true })

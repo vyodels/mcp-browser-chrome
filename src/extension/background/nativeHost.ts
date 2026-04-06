@@ -10,6 +10,7 @@ export function createNativeHostBridge(
 ): NativeHostBridge {
   let port: chrome.runtime.Port | null = null
   let reconnectTimer: number | null = null
+  let connecting = false
 
   const clearReconnectTimer = () => {
     if (reconnectTimer !== null) {
@@ -19,15 +20,21 @@ export function createNativeHostBridge(
   }
 
   const connect = () => {
+    if (port || connecting) return
+
     clearReconnectTimer()
+    connecting = true
 
     try {
       port = chrome.runtime.connectNative(NATIVE_HOST_NAME)
     } catch (error) {
+      connecting = false
       scheduleReconnect()
       console.error('[native-host] connect failed', error)
       return
     }
+
+    connecting = false
 
     port.onMessage.addListener(handleMessage)
     port.onDisconnect.addListener(() => {
@@ -79,4 +86,3 @@ export function createNativeHostBridge(
     start: connect,
   }
 }
-
