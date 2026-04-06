@@ -7,9 +7,11 @@ import os from 'node:os'
 import path from 'node:path'
 
 const SOCKET_PATH = process.env.MCP_BROWSER_CHROME_SOCKET || path.join(os.tmpdir(), 'browser-mcp.sock')
+const DEBUG_STANDALONE = process.argv.includes('--debug-standalone')
 
 const pending = new Map()
 let nativeBuffer = Buffer.alloc(0)
+let shuttingDown = false
 
 function writeNativeMessage(message) {
   const json = Buffer.from(JSON.stringify(message), 'utf8')
@@ -58,6 +60,19 @@ function socketPermissionsHint() {
   return `${SOCKET_PATH}#${digest}`
 }
 
+function cleanupSocketFile() {
+  if (existsSync(SOCKET_PATH)) rmSync(SOCKET_PATH, { force: true })
+}
+
+function shutdown() {
+  if (shuttingDown) return
+  shuttingDown = true
+  server.close(() => {
+    cleanupSocketFile()
+    process.exit(0)
+  })
+}
+
 if (existsSync(SOCKET_PATH)) {
   rmSync(SOCKET_PATH, { force: true })
 }
@@ -102,22 +117,20 @@ const server = createServer((socket) => {
 
 server.listen(SOCKET_PATH, () => {
   process.stderr.write(`[native-host] socket ready at ${socketPermissionsHint()}\n`)
+  if (DEBUG_STANDALONE) {
+    process.stderr.write('[native-host] debug standalone mode enabled; stdin close will be ignored\n')
+  }
 })
 
 process.stdin.on('data', parseNativeMessages)
 
 process.stdin.on('end', () => {
-  server.close(() => {
-    if (existsSync(SOCKET_PATH)) rmSync(SOCKET_PATH, { force: true })
-    process.exit(0)
-  })
+  if (DEBUG_STANDALONE) return
+  shutdown()
 })
 
 for (const signal of ['SIGINT', 'SIGTERM']) {
   process.on(signal, () => {
-    server.close(() => {
-      if (existsSync(SOCKET_PATH)) rmSync(SOCKET_PATH, { force: true })
-      process.exit(0)
-    })
+    shutdown()
   })
 }

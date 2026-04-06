@@ -8,7 +8,8 @@
     "build": "vite build",
     "typecheck": "tsc --noEmit",
     "mcp:start": "node mcp/server.mjs",
-    "native-host:start": "node native-host/host.mjs",
+    "native-host:start": "node native-host/host.mjs --debug-standalone",
+    "native-host:stdio": "node native-host/host.mjs",
     "native-host:install": "node scripts/install-native-host.mjs"
   },
   "devDependencies": {
