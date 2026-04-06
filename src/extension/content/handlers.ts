@@ -6,6 +6,11 @@ import { buildSnapshot, buildSnapshotSummary } from './snapshot'
 import { waitForDisappear, waitForElement, waitForText } from './waits'
 
 export function registerContentHandlers() {
+  // Wake the MV3 background service worker whenever the content script loads on a normal page.
+  chrome.runtime.sendMessage({ type: 'CONTENT_SCRIPT_READY' }, () => {
+    void chrome.runtime.lastError
+  })
+
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     switch (message.type) {
       case 'GET_PAGE_CONTENT':
@@ -63,4 +68,3 @@ export function registerContentHandlers() {
     return false
   })
 }
-

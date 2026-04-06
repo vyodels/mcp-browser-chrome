@@ -334,8 +334,16 @@ async function executeBrowserCommand(command: BrowserCommand): Promise<unknown> 
 export function registerBackgroundHandlers() {
   createNativeHostBridge(executeBrowserCommand).start()
 
+  // Ensure the MV3 service worker is woken on browser startup/install so the native bridge can connect.
+  chrome.runtime.onStartup.addListener(() => {})
+  chrome.runtime.onInstalled.addListener(() => {})
+
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     switch (message.type) {
+      case 'CONTENT_SCRIPT_READY':
+        sendResponse({ success: true })
+        return false
+
       case 'OPEN_SETTINGS':
         chrome.runtime.openOptionsPage()
         break

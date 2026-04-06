@@ -2,16 +2,24 @@
 
 import { createServer } from 'node:net'
 import { createHash, randomUUID } from 'node:crypto'
-import { existsSync, rmSync } from 'node:fs'
+import { appendFileSync, existsSync, rmSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 
 const SOCKET_PATH = process.env.MCP_BROWSER_CHROME_SOCKET || path.join(os.tmpdir(), 'browser-mcp.sock')
 const DEBUG_STANDALONE = process.argv.includes('--debug-standalone')
+const LOG_PATH = path.join(os.tmpdir(), 'browser-mcp-native-host.log')
 
 const pending = new Map()
 let nativeBuffer = Buffer.alloc(0)
 let shuttingDown = false
+
+function log(message) {
+  const line = `[${new Date().toISOString()}] ${message}\n`
+  try {
+    appendFileSync(LOG_PATH, line)
+  } catch {}
+}
 
 function writeNativeMessage(message) {
   const json = Buffer.from(JSON.stringify(message), 'utf8')
@@ -67,8 +75,10 @@ function cleanupSocketFile() {
 function shutdown() {
   if (shuttingDown) return
   shuttingDown = true
+  log('shutdown requested')
   server.close(() => {
     cleanupSocketFile()
+    log('server closed')
     process.exit(0)
   })
 }
@@ -77,8 +87,11 @@ if (existsSync(SOCKET_PATH)) {
   rmSync(SOCKET_PATH, { force: true })
 }
 
+log(`process start debugStandalone=${DEBUG_STANDALONE} socket=${SOCKET_PATH}`)
+
 const server = createServer((socket) => {
   let lineBuffer = ''
+  log('socket client connected')
 
   socket.on('data', (chunk) => {
     lineBuffer += chunk.toString('utf8')
@@ -103,12 +116,14 @@ const server = createServer((socket) => {
         continue
       }
 
+      log(`forward request ${request.command.name}`)
       pending.set(request.id, { socket })
       writeNativeMessage(request)
     }
   })
 
   socket.on('close', () => {
+    log('socket client closed')
     for (const [id, entry] of pending.entries()) {
       if (entry.socket === socket) pending.delete(id)
     }
@@ -116,6 +131,7 @@ const server = createServer((socket) => {
 })
 
 server.listen(SOCKET_PATH, () => {
+  log('socket ready')
   process.stderr.write(`[native-host] socket ready at ${socketPermissionsHint()}\n`)
   if (DEBUG_STANDALONE) {
     process.stderr.write('[native-host] debug standalone mode enabled; stdin close will be ignored\n')
@@ -123,8 +139,12 @@ server.listen(SOCKET_PATH, () => {
 })
 
 process.stdin.on('data', parseNativeMessages)
+process.stdin.on('data', () => {
+  log('stdin data received')
+})
 
 process.stdin.on('end', () => {
+  log('stdin end received')
   if (DEBUG_STANDALONE) return
   shutdown()
 })

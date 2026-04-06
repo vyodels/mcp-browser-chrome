@@ -1,8 +1,6 @@
 import type { InteractiveElement, PageSnapshot } from '../../types'
 
 export const NATIVE_HOST_NAME = 'com.vyodels.browser_mcp'
-export const HOST_SOCKET_PATH_ENV = 'MCP_BROWSER_CHROME_SOCKET'
-export const DEFAULT_HOST_SOCKET_PATH = '/tmp/browser-mcp.sock'
 
 export interface ElementLocator {
   ref?: string

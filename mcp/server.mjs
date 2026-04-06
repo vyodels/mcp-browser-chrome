@@ -50,9 +50,15 @@ const TOOLS = [
 }))
 
 let stdinBuffer = ''
+let transportMode = 'unknown'
 
 function writeMessage(message) {
   const body = Buffer.from(JSON.stringify(message), 'utf8')
+  if (transportMode === 'newline') {
+    process.stdout.write(`${body.toString('utf8')}\n`)
+    return
+  }
+
   process.stdout.write(`Content-Length: ${body.length}\r\n\r\n`)
   process.stdout.write(body)
 }
@@ -68,18 +74,51 @@ function sendError(id, code, message) {
 function extractMessages(chunk) {
   stdinBuffer += chunk.toString('utf8')
 
+  if (transportMode === 'unknown') {
+    const trimmed = stdinBuffer.trimStart()
+    if (!trimmed) return
+    transportMode = trimmed.startsWith('{') ? 'newline' : 'content-length'
+  }
+
+  if (transportMode === 'newline') {
+    while (true) {
+      const newlineIndex = stdinBuffer.indexOf('\n')
+      if (newlineIndex < 0) return
+
+      const line = stdinBuffer.slice(0, newlineIndex).trim()
+      stdinBuffer = stdinBuffer.slice(newlineIndex + 1)
+      if (!line) continue
+
+      let message
+      try {
+        message = JSON.parse(line)
+      } catch {
+        continue
+      }
+
+      void handleMessage(message)
+    }
+  }
+
   while (true) {
-    const headerEnd = stdinBuffer.indexOf('\r\n\r\n')
+    let headerEnd = stdinBuffer.indexOf('\r\n\r\n')
+    let separatorLength = 4
+    if (headerEnd < 0) {
+      headerEnd = stdinBuffer.indexOf('\n\n')
+      separatorLength = 2
+    }
     if (headerEnd < 0) return
     const header = stdinBuffer.slice(0, headerEnd)
-    const lengthLine = header.split('\r\n').find((line) => line.toLowerCase().startsWith('content-length:'))
+    const lengthLine = header
+      .split(/\r?\n/)
+      .find((line) => line.toLowerCase().startsWith('content-length:'))
     if (!lengthLine) {
       stdinBuffer = ''
       return
     }
 
     const length = Number(lengthLine.split(':')[1].trim())
-    const bodyStart = headerEnd + 4
+    const bodyStart = headerEnd + separatorLength
     if (stdinBuffer.length < bodyStart + length) return
 
     const body = stdinBuffer.slice(bodyStart, bodyStart + length)
@@ -196,3 +235,4 @@ async function handleMessage(message) {
 }
 
 process.stdin.on('data', extractMessages)
+process.stdin.resume()
