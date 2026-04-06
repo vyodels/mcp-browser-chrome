@@ -2,6 +2,7 @@
   "manifest_version": 3,
   "name": "browser-mcp",
   "version": "1.0.0",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAn84H8hVUE4+Ohxhw5jdn7hltsyzGbj5GFPd21KaL9bPxCPNM+fOdRu3WXO/2xU8g6vOOl/sXUmyoU/UAmGYdt/9/WkyVJkJoN4TQTDPwvO2RV6CsMiv+81g/rjE/MqtE/bv1bxP8iw7YdcIdR2qZjn/+R2buHsZ8G2UbT13FSzZRe4Yn6CUxJe6Z14mxoR6OwVu+OJpE6z8ZQiPjnF8vhOM9qcy4VI4801dcb4w9VYcy81//e7h5qOHrREBlRadoa77QcJycBeutylOWSYrLvNVpVc4OG9+FfVFWqn6/ZjeqJVZFJk63XrkvUdv0z71OCsyeCnUiCPcalYzQIDAQAB",
   "description": "Stealth-first Chrome browser MCP runtime",
   "permissions": [
     "activeTab",

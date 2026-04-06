@@ -27,7 +27,9 @@ src/extension/
 
 mcp/server.mjs
 native-host/host.mjs
+scripts/install-codex-mcp.mjs
 scripts/install-native-host.mjs
+scripts/setup-auto.mjs
 
 icons/
 README.md
@@ -84,7 +86,7 @@ Node 项目入口配置。
 作用：
 
 - 定义构建命令
-- 定义 `mcp:start`、`native-host:start`、`native-host:install`
+- 定义 `setup:auto`、`mcp:start`、`native-host:start`、`native-host:install`
 
 分类：
 
@@ -535,3 +537,35 @@ vite.config.ts
 - 构建入口已经不依赖旧 UI
 - 新的扩展执行层已经独立
 - 最后再清类型，冲击最小
+### `scripts/install-codex-mcp.mjs`
+
+作用：
+
+- 把 `browser-mcp` 注册进 `~/.codex/config.toml`
+- 让 Codex 自动托管 `mcp/server.mjs`
+
+分类：
+
+- `MCP 核心`
+
+### `scripts/install-native-host.mjs`
+
+作用：
+
+- 安装 Chrome Native Messaging manifest
+- 兼容当前已加载扩展 ID 和稳定扩展 ID
+
+分类：
+
+- `MCP 核心`
+
+### `scripts/setup-auto.mjs`
+
+作用：
+
+- 一次执行构建、Native Messaging 安装、Codex MCP 注册
+- 输出安装摘要和校验结果
+
+分类：
+
+- `MCP 核心`

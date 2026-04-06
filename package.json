@@ -7,10 +7,12 @@
     "dev": "vite build --watch",
     "build": "vite build",
     "typecheck": "tsc --noEmit",
+    "setup:auto": "node scripts/setup-auto.mjs",
     "mcp:start": "node mcp/server.mjs",
     "native-host:start": "node native-host/host.mjs --debug-standalone",
     "native-host:stdio": "node native-host/host.mjs",
-    "native-host:install": "node scripts/install-native-host.mjs"
+    "native-host:install": "node scripts/install-native-host.mjs",
+    "codex:mcp:install": "node scripts/install-codex-mcp.mjs"
   },
   "devDependencies": {
     "@types/chrome": "^0.0.268",

@@ -12,7 +12,20 @@
 
 ---
 
-## 先看运行方式
+## 目标体验
+
+正常使用时，不应该手动启动任何东西：
+
+- Chrome 打开且已加载 `dist/` 扩展
+- 扩展会自动唤醒 background service worker
+- background 会自动通过 Native Messaging 拉起 `native-host/host.mjs`
+- Codex 会通过 `~/.codex/config.toml` 自动托管 `mcp/server.mjs`
+
+也就是说，日常使用不需要手动执行 `npm run mcp:start` 或 `npm run native-host:start`。这两个命令都只保留给调试。
+
+---
+
+## 运行方式
 
 这个项目里有两个 Node 进程，但它们的职责不同：
 
@@ -24,13 +37,12 @@
 - `native-host/host.mjs`
   - 这是 Chrome Native Messaging host
   - 正常用法是被 Chrome 扩展拉起
-  - 直接以标准 host 模式执行时，也可能因为 `stdio` 断开而退出
-  - 仓库里的 `npm run native-host:start` 已切到本地调试模式，会保持 socket 常驻，方便排障
+  - `npm run native-host:start` 只用于本地调试
 
 一句话：
 
-- 想给 Codex 接 MCP，用 `npm run mcp:start`
-- 想单独确认 host/socket 是否正常，用 `npm run native-host:start`
+- 正常使用时，不需要手动启动它们
+- 调试 host/socket 时，再使用 `npm run native-host:start`
 
 ---
 
@@ -132,11 +144,10 @@ scripts/
 - Node.js 18+
 - Chrome 114+
 
-安装依赖并构建扩展：
+安装依赖：
 
 ```bash
 npm install
-npm run build
 ```
 
 在 Chrome 中加载扩展：
@@ -145,30 +156,50 @@ npm run build
 2. 开启开发者模式
 3. 选择“加载已解压的扩展程序”
 4. 选择仓库下的 `dist/`
-5. 记下扩展 ID
-
-安装 Native Messaging manifest：
+然后在仓库根目录执行一次自动安装：
 
 ```bash
-npm run native-host:install -- --extension-id=<your-extension-id>
+npm run setup:auto
 ```
 
-这个命令会生成：
+这个命令会：
+
+- 构建 `dist/`
+- 安装 Chrome Native Messaging manifest
+- 自动把 [mcp/server.mjs](/Users/vyodels/AgentProjects/mcp-browser-chrome/mcp/server.mjs) 注册到 `~/.codex/config.toml`
+- 输出安装摘要和校验结果
+
+项目现在在 [manifest.json](/Users/vyodels/AgentProjects/mcp-browser-chrome/manifest.json) 中固定了扩展 `key`，后续 unpacked 扩展 ID 会稳定，不会因为重新加载而漂移。
+
+执行成功后会生成：
 
 - `~/Library/Application Support/Google/Chrome/NativeMessagingHosts/com.vyodels.browser_mcp.json`
 
 manifest 里最关键的是两项：
 
 - `path` 必须指向当前仓库的 [native-host/host.mjs](/Users/vyodels/AgentProjects/mcp-browser-chrome/native-host/host.mjs)
-- `allowed_origins` 必须包含当前已加载扩展的 `chrome-extension://<extension-id>/`
+- `allowed_origins` 必须包含当前扩展 ID。安装脚本会兼容当前已加载 ID 和稳定 ID。
 
-如果你重新加载扩展后 ID 变了，需要重新执行安装命令。
+如果你是从旧版本升级到这个版本：
+
+1. 打开 `chrome://extensions`
+2. 对当前 `browser-mcp` 扩展点一次“重新加载”
+
+这一步只需要做一次，用来让 Chrome 接受新的稳定扩展 ID。完成后后续重载不应再需要重新绑定。
 
 ---
 
 ## 正常启动
 
-### 启动给 Codex 使用的 MCP server
+### 日常使用
+
+- 不需要手动启动 `mcp/server.mjs`
+- 不需要手动启动 `native-host/host.mjs`
+- 只要 Chrome 打开、扩展已加载、Codex 读取了 `~/.codex/config.toml`，`browser_*` tools 就会自动可用
+
+如果你刚执行完 `npm run setup:auto`，重新开一个 Codex 会话即可。
+
+### 调试 MCP server
 
 ```bash
 npm run mcp:start
@@ -178,7 +209,7 @@ npm run mcp:start
 
 - 这是 `stdio` MCP server
 - 设计上应该由 MCP client 托管
-- 如果你只是手动在终端跑一遍，看到它很快结束，不代表代码坏了
+- 直接在终端执行时，看起来会很快结束，这是预期行为
 
 ### 单独调试 native host
 
@@ -188,8 +219,7 @@ npm run native-host:start
 
 说明：
 
-- 这个脚本现在会以调试常驻模式启动
-- 它会监听本地 socket，并在 `stdin` 结束后继续存活
+- 这个脚本会以调试常驻模式启动
 - 适合排查“host 有没有起来”“socket 能不能连”
 
 如果你要模拟 Chrome 真正使用的 `stdio` host 方式，可以运行：
@@ -204,10 +234,10 @@ npm run native-host:stdio
 
 如果你怀疑“browser-mcp 启动失败”，按这个顺序查：
 
-1. `npm run build` 是否通过
+1. `npm run setup:auto` 是否执行成功
 2. Chrome 是否真的加载了 `dist/`
-3. 扩展 ID 是否和 Native Messaging manifest 里的 `allowed_origins` 一致
-4. `npm run native-host:start` 是否能打印 `socket ready`
+3. 如果是旧版本升级，是否在 `chrome://extensions` 里重载过一次扩展
+4. Chrome 打开普通网页后，扩展是否已自动拉起 native host
 5. MCP client 调用 tool 时，`mcp/server.mjs` 是否报 `Native host unavailable`
 
 常见误判：
@@ -215,9 +245,10 @@ npm run native-host:stdio
 - `npm run mcp:start` 一闪而过
   - 不是崩溃，是因为它本来就是 `stdio` 服务
 
-- `npm run native-host:start` 以前一闪而过
-  - 那是 host 模式依赖 `stdio`
-  - 现在脚本已改成调试常驻模式
+- 明明扩展加载了，但 MCP tool 还是超时
+  - 常见原因是 background 还没被普通网页唤醒，或者仍处于旧扩展实例
+  - 先打开一个普通网页，再看一次
+  - 如果是从旧版本升级，去 `chrome://extensions` 重载一次扩展
 
 - 扩展明明加载了，但没有任何响应
   - 大概率是 Native Messaging manifest 没装，或者扩展 ID 变了
@@ -228,11 +259,12 @@ npm run native-host:stdio
 
 ```bash
 npm run typecheck
-npm run build
+npm run setup:auto
 npm run mcp:start
 npm run native-host:start
 npm run native-host:stdio
-npm run native-host:install -- --extension-id=<your-extension-id>
+npm run native-host:install
+npm run codex:mcp:install
 ```
 
 ---
