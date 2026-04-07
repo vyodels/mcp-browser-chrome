@@ -1,6 +1,6 @@
 import type { BrowserActionRequest, BrowserCommand, SnapshotRequest } from '../shared/protocol'
-import { createNativeHostBridge } from './nativeHost'
 import { relayToContentScript, resolveTab } from './contentBridge'
+import { createNativeHostBridge } from './nativeHost'
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, errorMessage: string): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -460,7 +460,7 @@ export function registerBackgroundHandlers() {
   const nativeHostBridge = createNativeHostBridge(executeBrowserCommand)
   nativeHostBridge.start()
 
-  // Ensure the MV3 service worker is woken on browser startup/install so the native bridge can connect.
+  // Per Chrome extension lifecycle docs, an active connectNative port keeps the MV3 worker alive.
   chrome.runtime.onStartup.addListener(() => nativeHostBridge.start())
   chrome.runtime.onInstalled.addListener(() => nativeHostBridge.start())
   chrome.tabs.onActivated.addListener(() => nativeHostBridge.start())

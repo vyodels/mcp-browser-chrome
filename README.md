@@ -17,8 +17,7 @@
 正常使用时，不应该手动启动任何东西：
 
 - Chrome 打开且已加载 `dist/` 扩展
-- 扩展会自动唤醒 background service worker
-- background 会自动通过 Native Messaging 拉起 `native-host/host.mjs`
+- background service worker 会通过 `connectNative()` 直接连到 native host
 - Codex 会通过 `~/.codex/config.toml` 自动托管 `mcp/server.mjs`
 
 也就是说，日常使用不需要手动执行 `npm run mcp:start` 或 `npm run native-host:start`。这两个命令都只保留给调试。
@@ -177,8 +176,15 @@ npm run setup:auto
 
 manifest 里最关键的是两项：
 
-- `path` 必须指向当前仓库的 [native-host/host.mjs](/Users/vyodels/AgentProjects/mcp-browser-chrome/native-host/host.mjs)
+- `path` 必须指向当前仓库生成的 launcher，而不是依赖 shell 环境去解析 `node`
 - `allowed_origins` 必须包含当前扩展 ID。安装脚本会兼容当前已加载 ID 和稳定 ID。
+
+安装脚本现在会额外生成：
+
+- [native-host/host-launcher](/Users/vyodels/AgentProjects/mcp-browser-chrome/native-host/host-launcher)
+
+这个 launcher 会把当前机器上的 Node 绝对路径写进去，再启动 [native-host/host.mjs](/Users/vyodels/AgentProjects/mcp-browser-chrome/native-host/host.mjs)。
+这样 Chrome 启动 Native Messaging Host 时不依赖 `nvm`、shell profile 或 `PATH`，换电脑后只要重新执行 `npm run setup:auto` 即可。
 
 如果你是从旧版本升级到这个版本：
 
@@ -246,7 +252,7 @@ npm run native-host:stdio
   - 不是崩溃，是因为它本来就是 `stdio` 服务
 
 - 明明扩展加载了，但 MCP tool 还是超时
-  - 常见原因是 background 还没被普通网页唤醒，或者仍处于旧扩展实例
+  - 常见原因是扩展仍处于旧实例，或 native host 启动路径配置错误
   - 先打开一个普通网页，再看一次
   - 如果是从旧版本升级，去 `chrome://extensions` 重载一次扩展
 

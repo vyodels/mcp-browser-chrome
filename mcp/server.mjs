@@ -8,6 +8,8 @@ import { randomUUID } from 'node:crypto'
 const SOCKET_PATH = process.env.MCP_BROWSER_CHROME_SOCKET || path.join(os.tmpdir(), 'browser-mcp.sock')
 const SERVER_INFO = { name: 'browser-mcp', version: '1.0.0' }
 const PROTOCOL_VERSION = '2024-11-05'
+const BRIDGE_TIMEOUT_MS = Number(process.env.MCP_BROWSER_CHROME_BRIDGE_TIMEOUT_MS || 8000)
+const BRIDGE_RETRY_DELAYS_MS = [150, 500, 1200]
 
 const TOOLS = [
   ['browser_list_tabs', 'List tabs in the current Chrome window.', {}],
@@ -142,11 +144,42 @@ function extractMessages(chunk) {
   }
 }
 
-function callBridge(name, args = {}) {
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function isRetryableBridgeError(message) {
+  return [
+    'Native host unavailable',
+    'ENOENT',
+    'ECONNREFUSED',
+    'timed out',
+    'timeout',
+  ].some((fragment) => message.includes(fragment))
+}
+
+function callBridgeOnce(name, args = {}) {
   return new Promise((resolve, reject) => {
     const socket = createConnection(SOCKET_PATH)
     let buffer = ''
     const requestId = randomUUID()
+    let settled = false
+
+    const fail = (error) => {
+      if (settled) return
+      settled = true
+      reject(error instanceof Error ? error : new Error(String(error)))
+      socket.destroy()
+    }
+
+    const succeed = (result) => {
+      if (settled) return
+      settled = true
+      resolve(result)
+      socket.end()
+    }
+
+    socket.setTimeout(BRIDGE_TIMEOUT_MS)
 
     socket.on('connect', () => {
       socket.write(`${JSON.stringify({ id: requestId, type: 'browser_command', command: { name, arguments: args } })}\n`)
@@ -165,26 +198,49 @@ function callBridge(name, args = {}) {
         try {
           parsed = JSON.parse(line)
         } catch (error) {
-          reject(error)
-          socket.end()
+          fail(error)
           return
         }
 
         if (parsed.id !== requestId) continue
         if (parsed.ok === false) {
-          reject(new Error(parsed.error?.message ?? 'Bridge call failed'))
+          fail(new Error(parsed.error?.message ?? 'Bridge call failed'))
         } else {
-          resolve(parsed.result)
+          succeed(parsed.result)
         }
-        socket.end()
         return
       }
     })
 
     socket.on('error', (error) => {
-      reject(new Error(`Native host unavailable at ${SOCKET_PATH}: ${error.message}`))
+      fail(new Error(`Native host unavailable at ${SOCKET_PATH}: ${error.message}`))
+    })
+
+    socket.on('timeout', () => {
+      fail(new Error(`Bridge call timed out after ${BRIDGE_TIMEOUT_MS}ms via ${SOCKET_PATH}`))
     })
   })
+}
+
+async function callBridge(name, args = {}) {
+  let lastError = null
+
+  for (let attempt = 0; attempt <= BRIDGE_RETRY_DELAYS_MS.length; attempt += 1) {
+    try {
+      return await callBridgeOnce(name, args)
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error))
+      if (attempt === BRIDGE_RETRY_DELAYS_MS.length || !isRetryableBridgeError(lastError.message)) {
+        break
+      }
+      await sleep(BRIDGE_RETRY_DELAYS_MS[attempt])
+    }
+  }
+
+  throw new Error(
+    `${lastError?.message ?? `Bridge call failed for ${name}`}. ` +
+    'If Chrome is open, reload the browser-mcp extension once and keep a normal webpage tab available.'
+  )
 }
 
 async function handleToolCall(id, params) {
