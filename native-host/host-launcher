@@ -1,0 +1,2 @@
+#!/bin/sh
+exec "/Users/vyodels/.nvm/versions/node/v20.20.2/bin/node" "/Users/vyodels/AgentProjects/mcp-browser-chrome/native-host/host.mjs" "$@"

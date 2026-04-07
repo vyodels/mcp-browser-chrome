@@ -8,6 +8,7 @@ import process from 'node:process'
 
 const repoRoot = path.resolve(new URL('..', import.meta.url).pathname)
 const hostScript = path.join(repoRoot, 'native-host', 'host.mjs')
+const hostLauncher = path.join(repoRoot, 'native-host', 'host-launcher')
 const distPath = path.join(repoRoot, 'dist')
 const sourceManifestPath = path.join(repoRoot, 'manifest.json')
 const manifestDir = process.platform === 'darwin'
@@ -80,10 +81,19 @@ const extensionIds = resolveExtensionIds()
 mkdirSync(manifestDir, { recursive: true })
 chmodSync(hostScript, 0o755)
 
+const launcherScript = [
+  '#!/bin/sh',
+  `exec "${process.execPath}" "${hostScript}" "$@"`,
+  '',
+].join('\n')
+
+writeFileSync(hostLauncher, launcherScript)
+chmodSync(hostLauncher, 0o755)
+
 const manifest = {
   name: 'com.vyodels.browser_mcp',
   description: 'Native messaging host for browser-mcp',
-  path: hostScript,
+  path: hostLauncher,
   type: 'stdio',
   allowed_origins: extensionIds.map((extensionId) => `chrome-extension://${extensionId}/`),
 }
