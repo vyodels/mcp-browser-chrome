@@ -188,6 +188,16 @@ async function executeBrowserCommand(command: BrowserCommand): Promise<unknown> 
       return await waitForNavigation(target.id, Number(args.timeoutMs) || 10_000)
     }
 
+    case 'browser_go_forward': {
+      const target = await resolveTab(typeof args.tabId === 'number' ? args.tabId : undefined)
+      if (!target?.id) return { success: false, error: '没有活跃标签页' }
+      await chrome.scripting.executeScript({
+        target: { tabId: target.id },
+        func: () => history.forward(),
+      })
+      return await waitForNavigation(target.id, Number(args.timeoutMs) || 10_000)
+    }
+
     case 'browser_reload': {
       const target = await resolveTab(typeof args.tabId === 'number' ? args.tabId : undefined)
       if (!target?.id) return { success: false, error: '没有活跃标签页' }
@@ -265,23 +275,27 @@ async function executeBrowserCommand(command: BrowserCommand): Promise<unknown> 
     }
 
     case 'browser_click':
+    case 'browser_double_click':
     case 'browser_hover':
     case 'browser_fill':
     case 'browser_clear':
     case 'browser_select_option':
     case 'browser_press_key':
     case 'browser_scroll':
+    case 'browser_scroll_element':
     case 'browser_screenshot': {
       const target = await resolveTab(typeof args.tabId === 'number' ? args.tabId : undefined)
       if (!target?.id) return { success: false, error: '没有活跃标签页' }
       const actionMap: Record<string, BrowserActionRequest['action']> = {
         browser_click: 'click',
+        browser_double_click: 'double_click',
         browser_hover: 'hover',
         browser_fill: 'fill',
         browser_clear: 'clear',
         browser_select_option: 'select',
         browser_press_key: 'press',
         browser_scroll: 'scroll',
+        browser_scroll_element: 'scroll_element',
         browser_screenshot: 'screenshot',
       }
       const result = await relayToContentScript(target, {
@@ -293,6 +307,117 @@ async function executeBrowserCommand(command: BrowserCommand): Promise<unknown> 
       })
       if (!result.success) return { success: false, error: result.error }
       return { ...(result.response as object), tabId: target.id }
+    }
+
+    case 'browser_execute_script': {
+      const target = await resolveTab(typeof args.tabId === 'number' ? args.tabId : undefined)
+      if (!target?.id) return { success: false, error: '没有活跃标签页' }
+      const script = typeof args.script === 'string' ? args.script : ''
+      if (!script) return { success: false, error: '缺少 script 参数' }
+      try {
+        const results = await chrome.scripting.executeScript({
+          target: { tabId: target.id },
+          world: 'MAIN' as chrome.scripting.ExecutionWorld,
+          func: (code: string) => {
+            try {
+              // eslint-disable-next-line no-eval
+              const value = eval(code)
+              if (value && typeof (value as Promise<unknown>).then === 'function') {
+                return (value as Promise<unknown>)
+                  .then((v) => ({ success: true, result: JSON.parse(JSON.stringify(v ?? null)) }))
+                  .catch((e: Error) => ({ success: false, error: e.message }))
+              }
+              return { success: true, result: JSON.parse(JSON.stringify(value ?? null)) }
+            } catch (e) {
+              return { success: false, error: e instanceof Error ? e.message : String(e) }
+            }
+          },
+          args: [script],
+        })
+        return results?.[0]?.result ?? { success: true, result: null }
+      } catch (e) {
+        return { success: false, error: e instanceof Error ? e.message : String(e) }
+      }
+    }
+
+    case 'browser_get_cookies': {
+      const query: chrome.cookies.GetAllDetails = {}
+      if (typeof args.url === 'string') query.url = args.url
+      if (typeof args.domain === 'string') query.domain = args.domain
+      if (typeof args.name === 'string') query.name = args.name
+      const cookies = await chrome.cookies.getAll(query)
+      return {
+        success: true,
+        count: cookies.length,
+        cookies: cookies.map((c) => ({
+          name: c.name,
+          value: c.value,
+          domain: c.domain,
+          path: c.path,
+          secure: c.secure,
+          httpOnly: c.httpOnly,
+          session: c.session,
+          expirationDate: c.expirationDate,
+        })),
+      }
+    }
+
+    case 'browser_wait_for_url': {
+      const target = await resolveTab(typeof args.tabId === 'number' ? args.tabId : undefined)
+      if (!target?.id) return { success: false, error: '没有活跃标签页' }
+      const pattern = typeof args.pattern === 'string' ? args.pattern : ''
+      const timeoutMs = Number(args.timeoutMs) || 10_000
+      const tabId = target.id
+      const start = Date.now()
+      const current = await chrome.tabs.get(tabId)
+      if (current.url?.includes(pattern)) {
+        return { success: true, matched: true, url: current.url, elapsedMs: 0 }
+      }
+      return withTimeout(
+        new Promise<{ success: boolean; matched: boolean; url?: string; elapsedMs: number }>((resolve) => {
+          const onUpdated = (updatedId: number, info: chrome.tabs.TabChangeInfo, tab: chrome.tabs.Tab) => {
+            if (updatedId !== tabId) return
+            if (info.status === 'complete' && tab.url?.includes(pattern)) {
+              chrome.tabs.onUpdated.removeListener(onUpdated)
+              resolve({ success: true, matched: true, url: tab.url, elapsedMs: Date.now() - start })
+            }
+          }
+          chrome.tabs.onUpdated.addListener(onUpdated)
+        }),
+        timeoutMs,
+        `等待 URL 包含 "${pattern}" 超时`
+      ).catch((error) => ({
+        success: false,
+        matched: false,
+        elapsedMs: Date.now() - start,
+        error: error instanceof Error ? error.message : String(error),
+      }))
+    }
+
+    case 'browser_handle_dialog': {
+      const target = await resolveTab(typeof args.tabId === 'number' ? args.tabId : undefined)
+      if (!target?.id) return { success: false, error: '没有活跃标签页' }
+      const dialogAction = args.action === 'dismiss' ? 'dismiss' : 'accept'
+      const promptText = typeof args.promptText === 'string' ? args.promptText : ''
+      await chrome.scripting.executeScript({
+        target: { tabId: target.id },
+        world: 'MAIN' as chrome.scripting.ExecutionWorld,
+        func: (action: string, promptValue: string) => {
+          const origAlert = window.alert.bind(window)
+          const origConfirm = window.confirm.bind(window)
+          const origPrompt = window.prompt.bind(window)
+          ;(window as Window & typeof globalThis).alert = () => undefined
+          ;(window as Window & typeof globalThis).confirm = () => action === 'accept'
+          ;(window as Window & typeof globalThis).prompt = () => (action === 'accept' ? promptValue : null)
+          setTimeout(() => {
+            ;(window as Window & typeof globalThis).alert = origAlert
+            ;(window as Window & typeof globalThis).confirm = origConfirm
+            ;(window as Window & typeof globalThis).prompt = origPrompt
+          }, 10_000)
+        },
+        args: [dialogAction, promptText],
+      })
+      return { success: true, action: dialogAction, message: `对话框处理器已就绪（${dialogAction}），10秒后自动还原` }
     }
 
     case 'browser_download_file':

@@ -39,6 +39,13 @@ const TOOLS = [
   ['browser_save_text', 'Save text content to a file.', { filename: { type: 'string' }, content: { type: 'string' } }],
   ['browser_save_json', 'Save JSON content to a file.', { filename: { type: 'string' }, content: { type: 'object' } }],
   ['browser_save_csv', 'Save CSV content to a file.', { filename: { type: 'string' }, content: { type: 'string' } }],
+  ['browser_double_click', 'Double-click a target element.', { tabId: { type: 'number' }, ref: { type: 'string' }, selector: { type: 'string' }, text: { type: 'string' }, role: { type: 'string' }, index: { type: 'number' } }],
+  ['browser_scroll_element', 'Scroll within a specific scrollable container element (not the page). Use when the candidate list or chat panel has its own scroll area.', { tabId: { type: 'number' }, ref: { type: 'string' }, selector: { type: 'string' }, text: { type: 'string' }, role: { type: 'string' }, index: { type: 'number' }, direction: { type: 'string', enum: ['up', 'down'] }, pixels: { type: 'number' } }],
+  ['browser_execute_script', 'Execute JavaScript in the page main world and return the result. Use for extracting data from JS state, reading localStorage, or triggering framework-level events.', { tabId: { type: 'number' }, script: { type: 'string' } }],
+  ['browser_go_forward', 'Navigate the target tab forward in history.', { tabId: { type: 'number' }, timeoutMs: { type: 'number' } }],
+  ['browser_get_cookies', 'Get cookies. Filter by url, domain, or name. Use to verify login state.', { url: { type: 'string' }, domain: { type: 'string' }, name: { type: 'string' } }],
+  ['browser_wait_for_url', 'Wait until the tab URL contains the given pattern string. Useful after login redirects or form submissions.', { tabId: { type: 'number' }, pattern: { type: 'string' }, timeoutMs: { type: 'number' } }],
+  ['browser_handle_dialog', 'Pre-configure the next JavaScript alert/confirm/prompt dialog to auto-accept or auto-dismiss. Call this before triggering the action that shows the dialog.', { tabId: { type: 'number' }, action: { type: 'string', enum: ['accept', 'dismiss'] }, promptText: { type: 'string' } }],
 ].map(([name, description, properties]) => ({
   name,
   description,

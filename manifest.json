@@ -11,7 +11,8 @@
     "desktopCapture",
     "tabGroups",
     "downloads",
-    "nativeMessaging"
+    "nativeMessaging",
+    "cookies"
   ],
   "host_permissions": ["<all_urls>"],
   "background": {

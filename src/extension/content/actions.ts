@@ -60,37 +60,84 @@ export async function executeBrowserAction(action: BrowserActionRequest): Promis
         return { success: true, message: '点击成功', target: targetInfo(el, action.ref), snapshot: buildSnapshot() }
       }
 
+      case 'double_click': {
+        const el = resolveLocator(action)
+        await throttleAction()
+        dispatchPointerSequence(el)
+        await randomDelay(40, 100)
+        ;(el as HTMLElement).click()
+        await randomDelay(60, 160)
+        ;(el as HTMLElement).click()
+        el.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true }))
+        await randomDelay(200, 600)
+        return { success: true, message: '双击成功', target: targetInfo(el, action.ref), snapshot: buildSnapshot() }
+      }
+
       case 'fill': {
         const el = resolveLocator(action)
-        if (!(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)) {
-          throw new Error('目标元素不是输入框')
+        const isEditable = el instanceof HTMLElement && el.isContentEditable
+        if (!isEditable && !(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)) {
+          throw new Error('目标元素不是输入框或可编辑区域')
         }
         await throttleAction()
         dispatchPointerSequence(el)
         await randomDelay(40, 120)
-        applyInputValue(el, '')
-        el.dispatchEvent(new Event('input', { bubbles: true }))
-        const text = action.value ?? ''
-        for (const char of text) {
-          applyInputValue(el, `${el.value}${char}`)
-          el.dispatchEvent(new Event('input', { bubbles: true }))
-          await randomDelay(25, 110)
+        if (isEditable) {
+          const htmlEl = el as HTMLElement
+          htmlEl.focus()
+          const sel = window.getSelection()
+          const range = document.createRange()
+          range.selectNodeContents(htmlEl)
+          sel?.removeAllRanges()
+          sel?.addRange(range)
+          document.execCommand('delete', false, undefined)
+          const text = action.value ?? ''
+          for (const char of text) {
+            document.execCommand('insertText', false, char)
+            htmlEl.dispatchEvent(new InputEvent('input', { bubbles: true, data: char, inputType: 'insertText' }))
+            await randomDelay(25, 110)
+          }
+          htmlEl.dispatchEvent(new Event('change', { bubbles: true }))
+        } else {
+          const inputEl = el as HTMLInputElement | HTMLTextAreaElement
+          applyInputValue(inputEl, '')
+          inputEl.dispatchEvent(new Event('input', { bubbles: true }))
+          const text = action.value ?? ''
+          for (const char of text) {
+            applyInputValue(inputEl, `${inputEl.value}${char}`)
+            inputEl.dispatchEvent(new Event('input', { bubbles: true }))
+            await randomDelay(25, 110)
+          }
+          inputEl.dispatchEvent(new Event('change', { bubbles: true }))
+          inputEl.dispatchEvent(new Event('blur', { bubbles: true }))
         }
-        el.dispatchEvent(new Event('change', { bubbles: true }))
-        el.dispatchEvent(new Event('blur', { bubbles: true }))
         return { success: true, message: '输入完成', target: targetInfo(el, action.ref), snapshot: buildSnapshot() }
       }
 
       case 'clear': {
         const el = resolveLocator(action)
-        if (!(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)) {
-          throw new Error('目标元素不是输入框')
+        const isEditable = el instanceof HTMLElement && el.isContentEditable
+        if (!isEditable && !(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)) {
+          throw new Error('目标元素不是输入框或可编辑区域')
         }
         await throttleAction()
         dispatchPointerSequence(el)
-        applyInputValue(el, '')
-        el.dispatchEvent(new Event('input', { bubbles: true }))
-        el.dispatchEvent(new Event('change', { bubbles: true }))
+        if (isEditable) {
+          const htmlEl = el as HTMLElement
+          htmlEl.focus()
+          const sel = window.getSelection()
+          const range = document.createRange()
+          range.selectNodeContents(htmlEl)
+          sel?.removeAllRanges()
+          sel?.addRange(range)
+          document.execCommand('delete', false, undefined)
+          htmlEl.dispatchEvent(new Event('input', { bubbles: true }))
+        } else {
+          const inputEl = el as HTMLInputElement | HTMLTextAreaElement
+          applyInputValue(inputEl, '')
+          inputEl.dispatchEvent(new Event('input', { bubbles: true }))
+          inputEl.dispatchEvent(new Event('change', { bubbles: true }))
+        }
         return { success: true, message: '输入框已清空', target: targetInfo(el, action.ref), snapshot: buildSnapshot() }
       }
 
@@ -121,6 +168,16 @@ export async function executeBrowserAction(action: BrowserActionRequest): Promis
         window.scrollBy({ top: dir * pixels, behavior: 'smooth' })
         await randomDelay(400, 900)
         return { success: true, message: '滚动完成', snapshot: buildSnapshot() }
+      }
+
+      case 'scroll_element': {
+        const el = resolveLocator(action)
+        await throttleAction()
+        const pixels = action.pixels ?? 400
+        const dir = action.direction === 'up' ? -1 : 1
+        el.scrollBy({ top: dir * pixels, behavior: 'smooth' })
+        await randomDelay(400, 900)
+        return { success: true, message: '元素内滚动完成', target: targetInfo(el, action.ref), snapshot: buildSnapshot() }
       }
 
       case 'wait': {
@@ -176,4 +233,3 @@ export async function executeLegacyAction(action: AgentAction): Promise<ActionRe
 }
 
 export { configureRateLimit }
-
