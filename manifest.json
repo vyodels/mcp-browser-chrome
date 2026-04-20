@@ -3,6 +3,7 @@
   "name": "browser-mcp",
   "version": "1.0.0",
   "description": "Stealth-first Chrome browser MCP runtime",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAz32u3WZTPtQgNzpWabV1aUjTluBj+imQ/J72IbUR0vUjMvsM/kNd6DOSfOyzAF4HaUalrxgstPngY4YTU00dR8dMu0bD5hv0WbZGoufmqS2UFlcf/AdBv6zPeFj+czKSrDjGQ/uTlAhhdpIoC5vu9QUz8HLR/Y8a8SrVNfUe0jBS3g5/Puqk0OOZKSUI2E0MnUG0WeNwVsQ4J7LSFWoEyz3SnN9PKq3nAij++s2AXdaZapN2J/tj3XGrzZDNg3oi6Yub8v38FOHhS6MaCNNqCGWB5dj7nPJE6xSTlByhPosXEnxiz8mnztMk5U1CZFWdcOk0YrWhsde9TXypcaj16QIDAQAB",
   "permissions": [
     "activeTab",
     "tabs",
@@ -21,6 +22,7 @@
   },
   "action": {
     "default_title": "browser-mcp",
+    "default_popup": "popup.html",
     "default_icon": {
       "16": "icons/icon16.png",
       "48": "icons/icon48.png",

@@ -11,6 +11,8 @@ export default defineConfig({
       input: {
         background: resolve(__dirname, 'src/background.ts'),
         content: resolve(__dirname, 'src/content.ts'),
+        popup: resolve(__dirname, 'src/popup.html'),
+        mockBoss: resolve(__dirname, 'src/mock-boss.html'),
       },
       output: {
         entryFileNames: '[name].js',

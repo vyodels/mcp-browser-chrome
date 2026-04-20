@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>BOSS Mock Switch</title>
+    <style>
+      :root {
+        font-family: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+        color: #1f2937;
+      }
+
+      body {
+        width: 320px;
+        margin: 0;
+        padding: 16px;
+        background: #f5f7fa;
+      }
+
+      .panel {
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+        padding: 16px;
+        border: 1px solid #e5e7eb;
+        border-radius: 16px;
+        background: #ffffff;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: 18px;
+      }
+
+      .desc {
+        color: #6b7280;
+        line-height: 1.6;
+        font-size: 13px;
+      }
+
+      label {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        font-size: 13px;
+        font-weight: 600;
+      }
+
+      select,
+      button {
+        font: inherit;
+      }
+
+      select {
+        padding: 10px 12px;
+        border: 1px solid #d1d5db;
+        border-radius: 12px;
+        background: #fff;
+      }
+
+      .switch-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+      }
+
+      .toggle {
+        position: relative;
+        width: 48px;
+        height: 28px;
+        appearance: none;
+        border-radius: 999px;
+        background: #d1d5db;
+        outline: none;
+        cursor: pointer;
+        transition: background 0.2s ease;
+      }
+
+      .toggle::after {
+        content: "";
+        position: absolute;
+        top: 3px;
+        left: 4px;
+        width: 22px;
+        height: 22px;
+        border-radius: 50%;
+        background: white;
+        transition: transform 0.2s ease;
+      }
+
+      .toggle:checked {
+        background: #00a6a7;
+      }
+
+      .toggle:checked::after {
+        transform: translateX(18px);
+      }
+
+      .actions {
+        display: flex;
+        gap: 10px;
+      }
+
+      button {
+        flex: 1;
+        padding: 11px 12px;
+        border-radius: 12px;
+        border: 1px solid transparent;
+        cursor: pointer;
+      }
+
+      .primary {
+        background: #00a6a7;
+        color: #fff;
+      }
+
+      .secondary {
+        border-color: #d1d5db;
+        background: #fff;
+        color: #1f2937;
+      }
+
+      .status {
+        min-height: 20px;
+        color: #6b7280;
+        font-size: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="panel">
+      <div>
+        <h1>BOSS Mock</h1>
+        <div class="desc">把当前标签页切到页面级 mock，包含职位管理、推荐牛人、打招呼、沟通和在线简历页面。</div>
+      </div>
+      <div class="switch-row">
+        <div>
+          <div style="font-weight: 600;">启用页面级 mock</div>
+          <div class="desc">只切当前 tab，不新开标签页</div>
+        </div>
+        <input id="mockEnabled" class="toggle" type="checkbox" />
+      </div>
+      <label>
+        生命周期阶段
+        <select id="scenarioSelect">
+          <option value="fresh">阶段 0：未沟通</option>
+          <option value="greeted">阶段 1：已打招呼</option>
+          <option value="resume_received">阶段 2：已收简历</option>
+          <option value="contact_received">阶段 3：已收联系方式</option>
+        </select>
+      </label>
+      <div class="actions">
+        <button id="applyBtn" class="primary" type="button">应用到当前页</button>
+        <button id="disableBtn" class="secondary" type="button">关闭 mock</button>
+      </div>
+      <div id="status" class="status"></div>
+    </div>
+    <script type="module" src="/src/popup.ts"></script>
+  </body>
+  </html>

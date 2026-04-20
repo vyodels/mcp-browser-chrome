@@ -1,0 +1,754 @@
+:root {
+  --boss-bg: #f5f7fa;
+  --boss-surface: #ffffff;
+  --boss-line: #e5e9f0;
+  --boss-text: #1f2937;
+  --boss-subtle: #6b7280;
+  --boss-brand: #00a6a7;
+  --boss-brand-soft: #e6f8f7;
+  --boss-orange: #ff8a3d;
+  --boss-green: #12b76a;
+  --boss-shadow: 0 12px 28px rgba(15, 23, 42, 0.08);
+  color: var(--boss-text);
+  font-family: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  margin: 0;
+  min-height: 100%;
+  background: var(--boss-bg);
+}
+
+body {
+  color: var(--boss-text);
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+.mock-root {
+  display: grid;
+  grid-template-columns: 184px 1fr;
+  min-height: 100vh;
+}
+
+.mock-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 18px 14px;
+  background: linear-gradient(180deg, #0f172a 0%, #111827 100%);
+  color: #e5e7eb;
+}
+
+.mock-logo {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.mock-stage-badge {
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: rgba(0, 166, 167, 0.18);
+  color: #93f1ee;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.mock-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.menu-item {
+  width: 100%;
+  padding: 12px 14px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.menu-item.active {
+  background: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+}
+
+.mock-sidebar-footer {
+  margin-top: auto;
+  padding: 14px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.footer-title {
+  margin-bottom: 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.footer-desc {
+  color: #cbd5e1;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.mock-main {
+  padding: 20px;
+}
+
+.page-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.page-name {
+  margin-bottom: 6px;
+  font-size: 28px;
+  font-weight: 700;
+}
+
+.page-subtitle {
+  color: var(--boss-subtle);
+  font-size: 14px;
+}
+
+.panel {
+  border: 1px solid var(--boss-line);
+  border-radius: 18px;
+  background: var(--boss-surface);
+  box-shadow: var(--boss-shadow);
+}
+
+.dashboard-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.dashboard-card {
+  min-width: 108px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: var(--boss-surface);
+  border: 1px solid var(--boss-line);
+  box-shadow: var(--boss-shadow);
+}
+
+.dashboard-card span {
+  display: block;
+  color: var(--boss-subtle);
+  font-size: 12px;
+}
+
+.dashboard-card strong {
+  display: block;
+  margin-top: 6px;
+  font-size: 24px;
+}
+
+.split-layout {
+  display: grid;
+  grid-template-columns: minmax(360px, 480px) 1fr;
+  gap: 16px;
+}
+
+.split-layout.narrow {
+  grid-template-columns: minmax(320px, 420px) 1fr;
+}
+
+.jobs-list-panel,
+.job-detail-panel,
+.greet-summary-panel,
+.greet-editor-panel,
+.chat-list-panel,
+.chat-main-panel,
+.resume-summary-panel,
+.resume-detail-panel {
+  padding: 16px;
+}
+
+.jobs-list-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.job-card {
+  width: 100%;
+  padding: 16px;
+  border: 1px solid var(--boss-line);
+  border-radius: 16px;
+  background: #fbfcfd;
+  text-align: left;
+  cursor: pointer;
+}
+
+.job-card.selected {
+  border-color: var(--boss-brand);
+  box-shadow: 0 0 0 3px rgba(0, 166, 167, 0.1);
+}
+
+.job-card-title-row,
+.recommend-top-row,
+.recommend-name-row,
+.detail-title-row,
+.resume-name-row,
+.chat-list-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: center;
+}
+
+.job-card-title,
+.detail-title,
+.recommend-name,
+.greet-name,
+.resume-name {
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.job-card-label,
+.stage-chip,
+.salary-chip,
+.recommend-job-chip {
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--boss-brand-soft);
+  color: var(--boss-brand);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.salary-chip {
+  color: var(--boss-orange);
+  background: #fff3eb;
+}
+
+.job-card-meta,
+.detail-subtitle,
+.recommend-basic,
+.chat-list-job,
+.greet-meta,
+.resume-basic {
+  color: var(--boss-subtle);
+  font-size: 14px;
+}
+
+.job-card-stats,
+.job-card-bottom,
+.focus-row,
+.detail-list-plain,
+.card-actions,
+.modal-actions,
+.chat-layout,
+.resume-layout,
+.experience-columns {
+  display: flex;
+  gap: 12px;
+}
+
+.job-card-stats,
+.job-card-bottom {
+  margin-top: 12px;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+
+.job-status {
+  font-weight: 700;
+}
+
+.job-status.open {
+  color: var(--boss-brand);
+}
+
+.job-status.pending {
+  color: var(--boss-orange);
+}
+
+.job-status.closed {
+  color: #9ca3af;
+}
+
+.detail-section,
+.resume-section {
+  margin-top: 18px;
+}
+
+.detail-section-title,
+.resume-section-title,
+.column-title {
+  margin-bottom: 10px;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.detail-list,
+.tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+  padding: 0;
+  margin: 0;
+}
+
+.detail-list {
+  display: grid;
+  gap: 10px;
+  padding-left: 18px;
+}
+
+.tag,
+.soft-tag {
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+}
+
+.tag {
+  background: var(--boss-brand-soft);
+  color: var(--boss-brand);
+}
+
+.tag.compact,
+.soft-tag {
+  background: #f3f4f6;
+  color: #374151;
+}
+
+.soft-tag.active {
+  background: #111827;
+  color: #ffffff;
+}
+
+.recommend-filter-bar {
+  padding: 16px;
+}
+
+.recommend-filter-title {
+  margin-bottom: 10px;
+  font-weight: 700;
+}
+
+.recommend-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 14px;
+}
+
+.recommend-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 18px;
+  border: 1px solid var(--boss-line);
+  border-radius: 18px;
+  background: var(--boss-surface);
+  box-shadow: var(--boss-shadow);
+}
+
+.recommend-line,
+.experience-preview,
+.experience-line,
+.resume-block-title,
+.chat-list-preview {
+  line-height: 1.7;
+}
+
+.experience-preview {
+  color: var(--boss-subtle);
+  font-size: 13px;
+}
+
+.primary-btn,
+.ghost-btn,
+.quick-action-btn {
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1px solid transparent;
+  cursor: pointer;
+}
+
+.primary-btn {
+  background: var(--boss-brand);
+  color: #ffffff;
+}
+
+.ghost-btn,
+.quick-action-btn {
+  background: #ffffff;
+  border-color: var(--boss-line);
+  color: var(--boss-text);
+}
+
+.greet-textarea-wrap,
+.composer-row {
+  margin-top: 14px;
+}
+
+.greet-textarea,
+.chat-composer {
+  width: 100%;
+  min-height: 164px;
+  padding: 14px 16px;
+  border: 1px solid var(--boss-line);
+  border-radius: 14px;
+  resize: vertical;
+  background: #fbfcfd;
+}
+
+.chat-shell .dashboard-strip {
+  justify-content: flex-end;
+}
+
+.chat-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 14px;
+}
+
+.filter-pill {
+  padding: 8px 12px;
+  border: 1px solid var(--boss-line);
+  border-radius: 999px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.filter-pill.active {
+  background: #111827;
+  color: #fff;
+}
+
+.chat-layout {
+  display: grid;
+  grid-template-columns: 320px 1fr;
+  align-items: start;
+}
+
+.chat-list-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: calc(100vh - 220px);
+  overflow: auto;
+}
+
+.chat-main-panel {
+  min-height: 680px;
+}
+
+.chat-list-item {
+  width: 100%;
+  padding: 14px;
+  border: 1px solid var(--boss-line);
+  border-radius: 14px;
+  background: #fbfcfd;
+  text-align: left;
+  cursor: pointer;
+}
+
+.chat-list-item.selected {
+  border-color: var(--boss-brand);
+  background: #f0fcfb;
+}
+
+.chat-list-name {
+  margin: 6px 0;
+  font-weight: 700;
+}
+
+.chat-list-preview {
+  color: var(--boss-subtle);
+  font-size: 13px;
+}
+
+.unread-dot {
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: #ef4444;
+  color: white;
+  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.base-info-content {
+  padding: 16px;
+  border: 1px solid var(--boss-line);
+  border-radius: 18px;
+  background: #fbfcfd;
+}
+
+.base-info-single-top-detail,
+.resume-btn-content,
+.base-info-single-detial {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.base-name {
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.high-light-orange {
+  color: var(--boss-orange);
+  font-weight: 600;
+}
+
+.messages-container {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 16px;
+  padding: 18px;
+  border: 1px solid var(--boss-line);
+  border-radius: 18px;
+  background: #f8fafc;
+}
+
+.message-time,
+.message-position-header,
+.item-system {
+  text-align: center;
+  color: var(--boss-subtle);
+  font-size: 12px;
+}
+
+.message-position-header {
+  padding: 8px 10px;
+  border-radius: 999px;
+  background: #eef2f7;
+}
+
+.item-myself,
+.item-friend,
+.item-system.clearfix {
+  display: flex;
+  width: 100%;
+}
+
+.item-myself {
+  justify-content: flex-end;
+}
+
+.item-friend {
+  justify-content: flex-start;
+}
+
+.item-system.clearfix {
+  justify-content: center;
+}
+
+.text {
+  max-width: 78%;
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: #ffffff;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
+  line-height: 1.7;
+}
+
+.item-myself .text {
+  background: #e6f8f7;
+}
+
+.item-system .text {
+  max-width: 88%;
+}
+
+.status-read {
+  margin-right: 6px;
+  color: var(--boss-brand);
+  font-style: normal;
+}
+
+.message-card-wrap {
+  min-width: 320px;
+  padding: 14px;
+  border-radius: 16px;
+  border: 1px solid var(--boss-line);
+  background: #ffffff;
+}
+
+.message-card-top-wrap {
+  display: flex;
+  gap: 12px;
+}
+
+.message-dialog-icon {
+  display: inline-block;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: #e5f6f6;
+}
+
+.message-dialog-icon-contact {
+  background: linear-gradient(135deg, #b9f1ea, #7ad9d3);
+}
+
+.message-dialog-icon-weixin {
+  background: linear-gradient(135deg, #d4f7ce, #86d868);
+}
+
+.message-dialog-icon-resume {
+  background: linear-gradient(135deg, #dbeafe, #93c5fd);
+}
+
+.message-card-top-title {
+  margin: 0;
+  font-size: 15px;
+}
+
+.dialog-exchange-content {
+  margin: 8px 0 0;
+  color: var(--boss-subtle);
+  font-size: 13px;
+}
+
+.message-card-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.card-btn {
+  display: inline-flex;
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: #f3f4f6;
+  color: var(--boss-text);
+  font-size: 13px;
+}
+
+.number {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--boss-subtle);
+  font-size: 12px;
+}
+
+.message-priority-hint {
+  display: inline-flex;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 14px;
+  border-radius: 999px;
+  background: #fff7ed;
+  color: #9a3412;
+}
+
+.quick-actions-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.composer-row {
+  align-items: flex-end;
+  margin-top: 16px;
+}
+
+.composer-row .primary-btn {
+  min-width: 92px;
+  height: 46px;
+}
+
+.resume-layout {
+  display: grid;
+  grid-template-columns: 380px 1fr;
+  gap: 16px;
+}
+
+.resume-section p,
+.detail-list-plain,
+.greet-meta {
+  line-height: 1.8;
+}
+
+.resume-block + .resume-block {
+  margin-top: 14px;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.modal-card {
+  width: min(420px, 100%);
+  padding: 22px;
+  border-radius: 18px;
+  background: var(--boss-surface);
+  box-shadow: var(--boss-shadow);
+}
+
+.modal-title {
+  margin-bottom: 16px;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.empty-state {
+  padding: 22px;
+  text-align: center;
+  color: var(--boss-subtle);
+}
+
+.empty-state.large {
+  padding-top: 120px;
+}
+
+@media (max-width: 1120px) {
+  .mock-root,
+  .split-layout,
+  .chat-layout,
+  .resume-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .mock-sidebar {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+  }
+}
