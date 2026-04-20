@@ -12,7 +12,13 @@ const BRIDGE_TIMEOUT_MS = Number(process.env.MCP_BROWSER_CHROME_BRIDGE_TIMEOUT_M
 const BRIDGE_RETRY_DELAYS_MS = [150, 500, 1200]
 
 const TOOLS = [
-  ['browser_list_tabs', 'List tabs in the current Chrome window.', {}],
+  ['browser_list_tabs', 'List tabs in the current Chrome window by default. Set scope to "all_windows" to include regular tabs across all normal Chrome windows.', {
+    scope: {
+      type: 'string',
+      enum: ['current_window', 'all_windows'],
+      description: 'Optional tab listing scope. Defaults to "current_window". Use "all_windows" to include regular tabs across all normal Chrome windows.',
+    },
+  }],
   ['browser_get_active_tab', 'Get the active Chrome tab.', {}],
   ['browser_select_tab', 'Activate and focus a Chrome tab by tabId.', { tabId: { type: 'number' } }],
   ['browser_open_tab', 'Open a tab with an optional URL.', { url: { type: 'string' }, active: { type: 'boolean' } }],
