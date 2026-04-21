@@ -39,6 +39,7 @@ scripts/
 
 icons/
 docs/
+  field-notes/
 README.md
 ```
 
@@ -143,3 +144,17 @@ Native Messaging launcher 模板。安装脚本会基于当前机器上的 Node 
 ## 已移除的历史遗留
 
 旧的 sidepanel / workflow / settings / 内置 agent 相关代码已从 `src/deprecated/` 移除，不再保留在仓库中。
+
+## `docs/`
+
+文档目录当前分为三类：
+
+- 设计与约束
+  - `docs/project-prompt.md`
+  - `docs/repo-structure.md`
+- mock 数据模型
+  - `docs/boss-page-mock-data-model.md`
+  - `docs/mock-data-structure-guide.md`
+- 现场记录与经验沉淀
+  - `docs/field-notes/README.md`
+  - `docs/field-notes/2026-04-zhipin-validation-retrospective.md`
