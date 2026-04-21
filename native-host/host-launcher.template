@@ -1,0 +1,2 @@
+#!/bin/sh
+exec "__NODE_PATH__" "__HOST_SCRIPT__" "$@"

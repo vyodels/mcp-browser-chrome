@@ -50,7 +50,6 @@ export function checkRateLimit(): { allowed: boolean; waitMs: number } {
 export async function throttleAction(): Promise<void> {
   const { allowed, waitMs } = checkRateLimit()
   if (!allowed) {
-    console.warn(`[RateLimit] 超过频率限制，等待 ${waitMs}ms`)
     await new Promise((r) => setTimeout(r, waitMs))
   }
   state.actionTimestamps.push(Date.now())

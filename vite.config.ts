@@ -1,7 +1,8 @@
+import { build as esbuildBuild } from 'esbuild'
 import { defineConfig, type Plugin } from 'vite'
 import { resolve } from 'path'
 import { viteStaticCopy } from 'vite-plugin-static-copy'
-import { readdirSync, renameSync, rmdirSync, existsSync } from 'fs'
+import { existsSync, readdirSync, renameSync, rmdirSync } from 'fs'
 
 export default defineConfig({
   build: {
@@ -30,7 +31,17 @@ export default defineConfig({
     }),
     ({
       name: 'flatten-html',
-      closeBundle() {
+      async closeBundle() {
+        await esbuildBuild({
+          entryPoints: [resolve(__dirname, 'src/content.ts')],
+          bundle: true,
+          format: 'iife',
+          platform: 'browser',
+          target: ['chrome114'],
+          outfile: resolve(__dirname, 'dist/content.js'),
+          logLevel: 'silent',
+        })
+
         const srcDir = resolve(__dirname, 'dist/src')
         if (!existsSync(srcDir)) return
         for (const file of readdirSync(srcDir)) {

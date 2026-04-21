@@ -9,6 +9,7 @@ import process from 'node:process'
 const repoRoot = path.resolve(new URL('..', import.meta.url).pathname)
 const hostScript = path.join(repoRoot, 'native-host', 'host.mjs')
 const hostLauncher = path.join(repoRoot, 'native-host', 'host-launcher')
+const hostLauncherTemplate = path.join(repoRoot, 'native-host', 'host-launcher.template')
 const distPath = path.join(repoRoot, 'dist')
 const sourceManifestPath = path.join(repoRoot, 'manifest.json')
 const manifestDir = process.platform === 'darwin'
@@ -81,11 +82,11 @@ const extensionIds = resolveExtensionIds()
 mkdirSync(manifestDir, { recursive: true })
 chmodSync(hostScript, 0o755)
 
-const launcherScript = [
-  '#!/bin/sh',
-  `exec "${process.execPath}" "${hostScript}" "$@"`,
-  '',
-].join('\n')
+const launcherTemplate = readFileSync(hostLauncherTemplate, 'utf8')
+const launcherScript = launcherTemplate
+  .replaceAll('__NODE_PATH__', process.execPath)
+  .replaceAll('__HOST_SCRIPT__', hostScript)
+  .replace(/\s*$/, '\n')
 
 writeFileSync(hostLauncher, launcherScript)
 chmodSync(hostLauncher, 0o755)

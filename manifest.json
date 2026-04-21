@@ -9,11 +9,11 @@
     "tabs",
     "scripting",
     "storage",
-    "desktopCapture",
     "tabGroups",
     "downloads",
     "nativeMessaging",
-    "cookies"
+    "cookies",
+    "webNavigation"
   ],
   "host_permissions": ["<all_urls>"],
   "background": {
@@ -39,7 +39,7 @@
       "matches": ["<all_urls>"],
       "js": ["content.js"],
       "run_at": "document_idle",
-      "all_frames": false
+      "all_frames": true
     }
   ],
   "web_accessible_resources": [
