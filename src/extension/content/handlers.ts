@@ -1,6 +1,4 @@
-import type { AgentAction } from '../../types'
 import type { QueryElementsRequest, SnapshotRequest, WaitForDisappearRequest, WaitForElementRequest, WaitForTextRequest } from '../shared/protocol'
-import { executeLegacyAction, configureRateLimit } from './actions'
 import { queryElements } from './locators'
 import { buildSnapshot, buildSnapshotSummary } from './snapshot'
 import { waitForDisappear, waitForElement, waitForText } from './waits'
@@ -13,12 +11,8 @@ export function registerContentHandlers() {
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     switch (message.type) {
-      case 'GET_PAGE_CONTENT':
-        sendResponse({ success: true, snapshot: buildSnapshot() })
-        break
-
       case 'DEBUG_DOM':
-        sendResponse({ success: true, snapshot: buildSnapshot({ includeHtml: true }) })
+        sendResponse({ success: true, snapshot: buildSnapshot({ includeHtml: true, includeText: true }) })
         break
 
       case 'QUERY_ELEMENTS': {
@@ -43,21 +37,6 @@ export function registerContentHandlers() {
       case 'WAIT_FOR_DISAPPEAR':
         waitForDisappear((message.payload ?? {}) as WaitForDisappearRequest).then(sendResponse)
         return true
-
-      case 'EXECUTE_ACTION':
-        executeLegacyAction(message.payload as AgentAction).then(sendResponse)
-        return true
-
-      case 'CONFIGURE_RATE_LIMIT': {
-        const payload = message.payload as { max: number; delay: [number, number] } | undefined
-        if (!payload) {
-          sendResponse({ success: false, error: '缺少限流配置' })
-          break
-        }
-        configureRateLimit(payload.max, payload.delay)
-        sendResponse({ success: true })
-        break
-      }
 
       case 'BROWSER_SNAPSHOT': {
         const req = (message.payload ?? {}) as SnapshotRequest

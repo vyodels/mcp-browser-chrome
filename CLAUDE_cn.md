@@ -47,51 +47,35 @@ Codex / MCP Client
 |------|------|
 | `src/background.ts` | 薄壳入口，注册 background handlers |
 | `src/content.ts` | 薄壳入口，注册 content script handlers |
-| `src/rateLimit.ts` | 反检测：随机延迟、鼠标模拟 |
-| `src/types.ts` | 共享类型（含部分待清理的旧类型） |
+| `src/types.ts` | 共享类型，定义 tab、消息总线和只读快照载荷 |
 | `src/extension/background/handlers.ts` | Background 主路由，将 `browser_*` 命令分发到 Chrome API 或 content script |
 | `src/extension/background/nativeHost.ts` | Native Messaging 连接，接收 host 命令并驱动执行 |
-| `src/extension/background/contentBridge.ts` | Background↔content 通信桥，定位目标标签页，必要时重新注入 content script |
-| `src/extension/content/actions.ts` | 点击、悬停、填写、按键、滚动、截图，模拟真实事件链 |
-| `src/extension/content/snapshot.ts` | 页面快照 + 交互元素列表（默认精简模式） |
-| `src/extension/content/locators.ts` | 按 ref / selector / text / role / index 定位元素 |
-| `src/extension/content/state.ts` | `@e1`/`@e2` ref → DOM 元素映射管理 |
+| `src/extension/background/contentBridge.ts` | Background↔content 通信桥，定位目标标签页，必要时重新注入 content script，并固定向顶层 frame 发消息 |
+| `src/extension/content/snapshot.ts` | 页面快照采集器，递归穿透同源 iframe 和 open shadow DOM，返回 viewport/document/clickables |
+| `src/extension/content/locators.ts` | 只读元素查询：针对当前 snapshot 数据按 ref / selector / text / role / index 过滤 |
+| `src/extension/content/state.ts` | 临时 `@e1`/`@e2` ref → DOM 元素映射，仅供只读查询使用 |
 | `src/extension/content/waits.ts` | `wait_for_element`、`wait_for_text`、`wait_for_disappear` |
 | `src/extension/content/handlers.ts` | Content script 消息路由 |
-| `src/extension/shared/protocol.ts` | 命令名定义、Native Messaging bridge 类型、snapshot/action 结构 |
+| `src/extension/shared/protocol.ts` | 命令名定义、Native Messaging bridge 类型，以及只读 snapshot/query 结构 |
 | `mcp/server.mjs` | MCP stdio server，注册 `browser_*` 工具，转发调用到 native host |
 | `native-host/host.mjs` | Native Messaging host，桥接 Chrome 扩展 ↔ Unix socket |
 | `scripts/setup-auto.mjs` | 完整安装：构建 + native host + Codex 配置 |
 | `scripts/install-native-host.mjs` | 安装 `~/Library/Application Support/Google/Chrome/NativeMessagingHosts/com.vyodels.browser_mcp.json` |
 | `scripts/install-codex-mcp.mjs` | 向 `~/.codex/config.toml` 写入 `browser-mcp` 条目 |
 
-### 已归档（`src/deprecated/`）
-
-旧产品方向遗留代码（扩展内置 AI Agent），不参与 MCP 主路径，不参与构建：
-
-`openai.ts`、`sidepanel.ts/html`、`settings.ts/html`、`store.ts`、`tools.ts`、`workflow.ts`、`tabManager.ts`
-
 ---
 
 ## MCP 工具列表（`browser_*`）
 
-**标签页控制：** `browser_list_tabs`、`browser_get_active_tab`、`browser_select_tab`、`browser_open_tab`、`browser_close_tab`
+只支持以下 15 个工具：
 
-**页面导航：** `browser_navigate`、`browser_go_back`、`browser_reload`
-
-**页面读取：** `browser_snapshot`、`browser_query_elements`、`browser_get_element`、`browser_debug_dom`、`browser_screenshot`
-
-**页面交互：** `browser_click`、`browser_hover`、`browser_fill`、`browser_clear`、`browser_select_option`、`browser_press_key`、`browser_scroll`
-
-**等待：** `browser_wait`、`browser_wait_for_element`、`browser_wait_for_text`、`browser_wait_for_navigation`、`browser_wait_for_disappear`
-
-**文件输出：** `browser_download_file`、`browser_save_text`、`browser_save_json`、`browser_save_csv`
+`browser_list_tabs`、`browser_get_active_tab`、`browser_select_tab`、`browser_open_tab`、`browser_snapshot`、`browser_query_elements`、`browser_get_element`、`browser_debug_dom`、`browser_screenshot`、`browser_get_cookies`、`browser_wait_for_element`、`browser_wait_for_text`、`browser_wait_for_disappear`、`browser_wait_for_navigation`、`browser_wait_for_url`
 
 ---
 
 ## 快照与 Ref 系统
 
-每次调用 `browser_snapshot` 时，`snapshot.ts` 扫描页面所有可见可交互元素，分配临时引用 `@e1`、`@e2`...，供 `browser_click`、`browser_fill` 等工具使用。**引用在每次快照时重新生成，不跨调用保留。** `browser_debug_dom` 可按需获取详细 DOM 信息。
+`browser_snapshot` 现在返回只读载荷，包含 `viewport`、`document`、`clickables` 三部分。`clickables` 仅用于只读查询和定位，不再用于浏览器交互；`browser_query_elements` 和 `browser_get_element` 仍可能返回 ref，但这些 ref 不再驱动任何动作工具。`browser_debug_dom` 可按需获取详细 DOM 信息。
 
 ---
 
@@ -100,7 +84,7 @@ Codex / MCP Client
 - Chrome 114+ 必须
 - 无运行时 npm 依赖，纯 TypeScript，Vite 编译
 - 所有数据本地存储，仅 MCP client 侧 AI 会产生网络请求
-- `src/rateLimit.ts` 反检测逻辑不可删除或绕过
+- 不保留页面交互辅助层；运行时只做只读查询和 tab 级控制
 - HTML 不允许内联事件处理器（CSP），所有监听器通过 TS 文件 `addEventListener` 注册
 - Unix socket 路径：`path.join(os.tmpdir(), 'browser-mcp.sock')`，不可硬编码为 `/tmp/browser-mcp.sock`
 - `manifest.json` 中扩展 `key` 已固定，unpacked 扩展 ID 不会因重新加载漂移

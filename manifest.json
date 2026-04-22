@@ -2,15 +2,11 @@
   "manifest_version": 3,
   "name": "browser-mcp",
   "version": "1.0.0",
-  "description": "Stealth-first Chrome browser MCP runtime",
+  "description": "Read-only Chrome browser MCP runtime",
   "permissions": [
     "activeTab",
     "tabs",
     "scripting",
-    "storage",
-    "desktopCapture",
-    "tabGroups",
-    "downloads",
     "nativeMessaging",
     "cookies"
   ],
@@ -38,12 +34,6 @@
       "js": ["content.js"],
       "run_at": "document_idle",
       "all_frames": false
-    }
-  ],
-  "web_accessible_resources": [
-    {
-      "resources": ["assets/*"],
-      "matches": ["<all_urls>"]
     }
   ]
 }

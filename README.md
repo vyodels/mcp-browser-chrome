@@ -81,31 +81,17 @@ P0 已接入：
 - `browser_get_active_tab`
 - `browser_select_tab`
 - `browser_open_tab`
-- `browser_close_tab`
-- `browser_navigate`
-- `browser_go_back`
-- `browser_reload`
 - `browser_snapshot`
 - `browser_query_elements`
 - `browser_get_element`
 - `browser_debug_dom`
-- `browser_click`
-- `browser_hover`
-- `browser_fill`
-- `browser_clear`
-- `browser_select_option`
-- `browser_press_key`
-- `browser_scroll`
-- `browser_wait`
+- `browser_screenshot`
+- `browser_get_cookies`
 - `browser_wait_for_element`
 - `browser_wait_for_text`
 - `browser_wait_for_navigation`
 - `browser_wait_for_disappear`
-- `browser_screenshot`
-- `browser_download_file`
-- `browser_save_text`
-- `browser_save_json`
-- `browser_save_csv`
+- `browser_wait_for_url`
 
 ---
 
@@ -282,8 +268,8 @@ npm run codex:mcp:install
 - 不使用 `localhost HTTP/WebSocket` 作为扩展桥接主通道
 - 不在页面主 world 常驻注入桥接脚本
 - 内容脚本优先在 isolated world 执行
-- snapshot 默认精简，debug DOM 单独调用
-- click/fill 使用更接近真人的事件链与输入方式
+- snapshot 默认只返回只读结构化数据，`debug DOM` 单独调用
+- 不产生页面可观察的合成交互事件
 
 注意：
 

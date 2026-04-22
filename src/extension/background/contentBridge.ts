@@ -4,7 +4,9 @@ function canInjectContentScript(url?: string): boolean {
 
 function sendTabMessage<T>(tabId: number, payload: object): Promise<{ ok: true; response: T } | { ok: false; error: string }> {
   return new Promise((resolve) => {
-    chrome.tabs.sendMessage(tabId, payload, (response) => {
+    // Read-only collection is centralized in the top frame; same-origin iframes are
+    // traversed from there via DOM access instead of per-frame message fan-out.
+    chrome.tabs.sendMessage(tabId, payload, { frameId: 0 }, (response) => {
       if (chrome.runtime.lastError) {
         resolve({ ok: false, error: chrome.runtime.lastError.message ?? '发送消息失败' })
       } else {
@@ -64,4 +66,3 @@ export async function relayToContentScript<T>(
   if (secondTry.ok) return { success: true, response: secondTry.response }
   return { success: false, error: secondTry.error }
 }
-

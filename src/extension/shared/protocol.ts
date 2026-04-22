@@ -1,4 +1,4 @@
-import type { InteractiveElement, PageSnapshot } from '../../types'
+import type { ClickableElement } from '../../types'
 
 export const NATIVE_HOST_NAME = 'com.vyodels.browser_mcp'
 
@@ -12,9 +12,10 @@ export interface ElementLocator {
 
 export interface SnapshotRequest {
   includeHtml?: boolean
+  includeText?: boolean
   maxTextLength?: number
   maxHtmlLength?: number
-  interactiveLimit?: number
+  clickableLimit?: number
 }
 
 export interface QueryElementsRequest extends ElementLocator {
@@ -38,41 +39,15 @@ export interface WaitForDisappearRequest extends QueryElementsRequest {
   pollIntervalMs?: number
 }
 
-export type BrowserActionName =
-  | 'click'
-  | 'double_click'
-  | 'hover'
-  | 'fill'
-  | 'clear'
-  | 'select'
-  | 'press'
-  | 'scroll'
-  | 'scroll_element'
-  | 'wait'
-  | 'navigate'
-  | 'focus'
-  | 'blur'
-  | 'screenshot'
-
-export interface BrowserActionRequest extends ElementLocator {
-  action: BrowserActionName
-  value?: string
-  key?: string
-  url?: string
-  direction?: 'up' | 'down'
-  pixels?: number
-  ms?: number
-}
-
 export interface SnapshotSummary {
   url: string
   title: string
-  interactiveCount: number
+  clickableCount: number
 }
 
 export interface QueryElementsResponse {
   success: boolean
-  matches: InteractiveElement[]
+  matches: ClickableElement[]
   snapshotSummary: SnapshotSummary
   error?: string
 }
@@ -81,24 +56,8 @@ export interface WaitForConditionResponse {
   success: boolean
   matched: boolean
   elapsedMs: number
-  matches?: InteractiveElement[]
+  matches?: ClickableElement[]
   snapshotSummary: SnapshotSummary
-  error?: string
-}
-
-export interface BrowserActionResponse {
-  success: boolean
-  tabId?: number
-  message: string
-  target?: {
-    ref?: string
-    tag?: string
-    text?: string
-  }
-  snapshotSummary?: SnapshotSummary
-  navigationDetected?: boolean
-  snapshot?: PageSnapshot
-  screenshotDataUrl?: string
   error?: string
 }
 
@@ -107,38 +66,17 @@ export type BrowserCommandName =
   | 'browser_get_active_tab'
   | 'browser_select_tab'
   | 'browser_open_tab'
-  | 'browser_close_tab'
-  | 'browser_navigate'
-  | 'browser_go_back'
-  | 'browser_go_forward'
-  | 'browser_reload'
   | 'browser_snapshot'
   | 'browser_query_elements'
   | 'browser_get_element'
   | 'browser_debug_dom'
-  | 'browser_click'
-  | 'browser_double_click'
-  | 'browser_hover'
-  | 'browser_fill'
-  | 'browser_clear'
-  | 'browser_select_option'
-  | 'browser_press_key'
-  | 'browser_scroll'
-  | 'browser_scroll_element'
-  | 'browser_wait'
   | 'browser_wait_for_element'
   | 'browser_wait_for_text'
   | 'browser_wait_for_navigation'
   | 'browser_wait_for_disappear'
-  | 'browser_execute_script'
   | 'browser_get_cookies'
   | 'browser_wait_for_url'
-  | 'browser_handle_dialog'
   | 'browser_screenshot'
-  | 'browser_download_file'
-  | 'browser_save_text'
-  | 'browser_save_json'
-  | 'browser_save_csv'
 
 export interface BrowserCommand {
   name: BrowserCommandName

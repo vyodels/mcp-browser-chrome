@@ -43,51 +43,38 @@ Codex / MCP Client
 |------|------|
 | `src/background.ts` | Thin entry — registers background handlers |
 | `src/content.ts` | Thin entry — registers content script handlers |
-| `src/rateLimit.ts` | Anti-detection: random delays, mouse simulation |
-| `src/types.ts` | Shared types (contains some legacy types pending cleanup) |
+| `src/types.ts` | Shared types for tabs, message bus, and read-only snapshot payloads |
 | `src/extension/background/handlers.ts` | Background main router — maps `browser_*` commands to Chrome API or content script |
 | `src/extension/background/nativeHost.ts` | Native Messaging connection — receives commands from host, drives execution |
-| `src/extension/background/contentBridge.ts` | Background↔content bridge — locates target tab, re-injects content script if needed |
-| `src/extension/content/actions.ts` | Click, hover, fill, key, scroll, screenshot — realistic event chains |
-| `src/extension/content/snapshot.ts` | Page snapshot + interactive element list (compact by default) |
-| `src/extension/content/locators.ts` | Element lookup by ref / selector / text / role / index |
-| `src/extension/content/state.ts` | `@e1`/`@e2` ref → DOM element map |
+| `src/extension/background/contentBridge.ts` | Background↔content bridge — locates target tab, re-injects content script if needed, always targets the top frame |
+| `src/extension/content/snapshot.ts` | Page snapshot collector — traverses same-origin iframes + open shadow DOM and returns viewport/document/clickables |
+| `src/extension/content/locators.ts` | Read-only element lookup by ref / selector / text / role / index against current snapshot data |
+| `src/extension/content/state.ts` | Ephemeral `@e1`/`@e2` ref → DOM element map used by read-only lookup helpers |
 | `src/extension/content/waits.ts` | `wait_for_element`, `wait_for_text`, `wait_for_disappear` |
 | `src/extension/content/handlers.ts` | Content script message router |
-| `src/extension/shared/protocol.ts` | Command names, Native Messaging bridge types, snapshot/action schemas |
+| `src/extension/shared/protocol.ts` | Command names, Native Messaging bridge types, and read-only snapshot/query schemas |
 | `mcp/server.mjs` | MCP stdio server — registers `browser_*` tools, forwards calls to native host |
 | `native-host/host.mjs` | Native Messaging host — bridges Chrome extension ↔ Unix socket |
 | `scripts/setup-auto.mjs` | Full install: build + native host + Codex config |
 | `scripts/install-native-host.mjs` | Installs `~/Library/Application Support/Google/Chrome/NativeMessagingHosts/com.vyodels.browser_mcp.json` |
 | `scripts/install-codex-mcp.mjs` | Writes `browser-mcp` entry to `~/.codex/config.toml` |
 
-**Deprecated** (`src/deprecated/`) — old in-extension AI agent product, not part of MCP runtime, not built:
-`openai.ts`, `sidepanel.ts/html`, `settings.ts/html`, `store.ts`, `tools.ts`, `workflow.ts`, `tabManager.ts`
-
 ### MCP Tools (`browser_*`)
 
-Tab control: `browser_list_tabs`, `browser_get_active_tab`, `browser_select_tab`, `browser_open_tab`, `browser_close_tab`
+Only these 15 tools are supported:
 
-Navigation: `browser_navigate`, `browser_go_back`, `browser_reload`
-
-Page reading: `browser_snapshot`, `browser_query_elements`, `browser_get_element`, `browser_debug_dom`, `browser_screenshot`
-
-Interaction: `browser_click`, `browser_hover`, `browser_fill`, `browser_clear`, `browser_select_option`, `browser_press_key`, `browser_scroll`
-
-Waiting: `browser_wait`, `browser_wait_for_element`, `browser_wait_for_text`, `browser_wait_for_navigation`, `browser_wait_for_disappear`
-
-Output: `browser_download_file`, `browser_save_text`, `browser_save_json`, `browser_save_csv`
+`browser_list_tabs`, `browser_get_active_tab`, `browser_select_tab`, `browser_open_tab`, `browser_snapshot`, `browser_query_elements`, `browser_get_element`, `browser_debug_dom`, `browser_screenshot`, `browser_get_cookies`, `browser_wait_for_element`, `browser_wait_for_text`, `browser_wait_for_disappear`, `browser_wait_for_navigation`, `browser_wait_for_url`
 
 ### Snapshot + Ref System
 
-`snapshot.ts` scans visible interactive elements on each `browser_snapshot` call and assigns ephemeral `@e1`, `@e2`... refs for use in `browser_click`, `browser_fill`, etc. Refs are regenerated on every snapshot and do not persist across calls. `browser_debug_dom` provides verbose DOM detail on demand.
+`browser_snapshot` now returns a read-only payload with `viewport`, `document`, and `clickables`. `clickables` are descriptive targets for inspection and querying only; refs are no longer used for browser interaction. Refs may still appear in read-only lookup results from `browser_query_elements` / `browser_get_element`, but they do not drive any action tool. `browser_debug_dom` provides verbose DOM detail on demand.
 
 ### Key Design Constraints
 
 - Chrome 114+ required
 - No runtime npm dependencies — pure TypeScript compiled via Vite
 - All data stays local — only `mcp/server.mjs` communicates over the network (to the MCP client's AI)
-- `src/rateLimit.ts` anti-detection behavior is intentional — do not remove or bypass it
+- No synthetic page interaction helpers — the runtime is intentionally read-only aside from tab open/select/focus
 - No inline event handlers in HTML (CSP) — all listeners via `addEventListener`
 - Unix socket path: `path.join(os.tmpdir(), 'browser-mcp.sock')` — never hardcode `/tmp/browser-mcp.sock`
 - Extension `key` is fixed in `manifest.json` so the unpacked extension ID stays stable across reloads
