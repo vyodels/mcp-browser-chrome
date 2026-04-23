@@ -61,13 +61,13 @@ Codex / MCP Client
 
 ### MCP Tools (`browser_*`)
 
-Only these 15 tools are supported:
+Only these 16 tools are supported:
 
-`browser_list_tabs`, `browser_get_active_tab`, `browser_select_tab`, `browser_open_tab`, `browser_snapshot`, `browser_query_elements`, `browser_get_element`, `browser_debug_dom`, `browser_screenshot`, `browser_get_cookies`, `browser_wait_for_element`, `browser_wait_for_text`, `browser_wait_for_disappear`, `browser_wait_for_navigation`, `browser_wait_for_url`
+`browser_list_tabs`, `browser_get_active_tab`, `browser_reload_extension`, `browser_select_tab`, `browser_open_tab`, `browser_snapshot`, `browser_query_elements`, `browser_get_element`, `browser_debug_dom`, `browser_screenshot`, `browser_get_cookies`, `browser_wait_for_element`, `browser_wait_for_text`, `browser_wait_for_disappear`, `browser_wait_for_navigation`, `browser_wait_for_url`
 
 ### Snapshot + Ref System
 
-`browser_snapshot` now returns a read-only payload with `viewport`, `document`, and `clickables`. `clickables` are descriptive targets for inspection and querying only; refs are no longer used for browser interaction. Refs may still appear in read-only lookup results from `browser_query_elements` / `browser_get_element`, but they do not drive any action tool. `browser_debug_dom` provides verbose DOM detail on demand.
+`browser_snapshot` now returns a read-only payload with `viewport`, `document`, and `clickables`; top-level results also carry `tabId` plus `target.{tabId,windowId,url,title}` so external consumers can disambiguate the destination tab/window. The `viewport` block exposes page-level geometry consumers need for coordinate math (`innerWidth/Height`, `scrollX/Y`, `devicePixelRatio`, `screenX/Y`, and an optional `visualViewport` with pinch-zoom scale + offsets). Each clickable also carries a stable 16-character `signature`, `hitTestState`, and a randomized `clickPoint` guaranteed to lie inside a currently effective hit region. File-related elements also expose semantic fields such as `type`, `accept`, `multiple`, and `download`. `clickables` are descriptive targets for inspection and querying only; refs are no longer used for browser interaction. Refs may still appear in read-only lookup results from `browser_query_elements` / `browser_get_element`, but they do not drive any action tool. `browser_debug_dom` provides verbose DOM detail on demand.
 
 ### Key Design Constraints
 
@@ -77,4 +77,4 @@ Only these 15 tools are supported:
 - No synthetic page interaction helpers — the runtime is intentionally read-only aside from tab open/select/focus
 - No inline event handlers in HTML (CSP) — all listeners via `addEventListener`
 - Unix socket path: `path.join(os.tmpdir(), 'browser-mcp.sock')` — never hardcode `/tmp/browser-mcp.sock`
-- Extension `key` is fixed in `manifest.json` so the unpacked extension ID stays stable across reloads
+- New builds should be applied via `browser_reload_extension`; if the MCP chain itself is not connected yet, reload the unpacked extension once in `chrome://extensions`

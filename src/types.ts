@@ -23,6 +23,13 @@ export interface SnapshotViewport {
   scrollX: number
   scrollY: number
   devicePixelRatio: number
+  screenX: number
+  screenY: number
+  visualViewport?: {
+    scale: number
+    offsetLeft: number
+    offsetTop: number
+  }
 }
 
 export interface SnapshotDocument {
@@ -37,6 +44,16 @@ export interface ElementRect {
   height: number
 }
 
+export interface ElementPoint {
+  x: number
+  y: number
+}
+
+export interface ClickablePoint {
+  viewport: ElementPoint
+  document: ElementPoint
+}
+
 export interface PageSnapshot {
   url: string
   title: string
@@ -49,13 +66,19 @@ export interface PageSnapshot {
 
 export interface ClickableElement {
   ref: string
+  signature: string
+  hitTestState?: 'top' | 'partial' | 'covered'
+  clickPoint?: ClickablePoint
   tag: string
   role?: string
   text: string
   ariaLabel?: string
   href?: string
+  download?: string
   name?: string
   type?: string
+  accept?: string
+  multiple?: boolean
   viewport: ElementRect
   document: ElementRect
   inViewport: boolean

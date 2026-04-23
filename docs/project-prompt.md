@@ -64,22 +64,22 @@ Native Messaging 的优势：
 ### 内容脚本低痕执行原则
 
 1. **优先使用 content script isolated world**，主要逻辑不向页面主 world 注入
-2. **仅在需要时做最小交互**：先读页面，再局部定位，再执行操作，失败时才进入 debug 模式
-3. **事件链尽量接近真人**：
-   - click 补齐 `pointerover → mouseover → mousemove → pointerdown → mousedown → focus → pointerup → mouseup → click`
-   - fill 使用原生 setter，触发 `input` / `change` / `blur`
-4. **操作节奏反规律化**：随机延迟存在但不机械，滚动距离、输入间隔、点击前停顿均需随机化
-5. **默认只暴露必要快照**：页面文本限制长度，交互元素限制数量，HTML 仅在 debug 模式下返回
-6. **显式等待优于盲等**：优先 `wait_for_element` / `wait_for_text` / `wait_for_navigation`
+2. **默认只读优先**：先读页面，再做定位与分层；运行时本身不在页面内合成点击、输入、滚动等事件
+3. **默认只暴露必要快照**：页面文本限制长度，clickables 限制数量，HTML 仅在 debug 模式下返回
+4. **快照需要足够几何信息**：
+   - 页面级：`innerWidth/Height`、`scrollX/Y`、`devicePixelRatio`、`screenX/Y`、`visualViewport`
+   - 元素级：`viewport` / `document` / `framePath` / `shadowDepth`
+   - 命中级：`hitTestState` + 位于真实生效区域内的随机 `clickPoint`
+5. **显式等待优于盲等**：优先 `wait_for_element` / `wait_for_text` / `wait_for_navigation`
 
 ---
 
 ### MCP 工具设计原则
 
-1. **工具分层，不走"大一统万能工具"**：tabs/navigation、snapshot/query、interaction、wait、capture/files
+1. **工具分层，不走"大一统万能工具"**：tabs、snapshot/query、wait、capture、extension lifecycle
 2. **默认最小读取**：`browser_snapshot` 返回精简信息，`browser_debug_dom` 仅按需调用
-3. **交互工具支持多种定位方式**：`ref`、`selector`、`text`、`role`、`index`，优先级从高到低
-4. **工具返回结构化结果**：至少包含 `success`、`tabId`、`target`、`navigationDetected`、`snapshotSummary`、`error`
+3. **只读定位支持多种方式**：`ref`、`selector`、`text`、`role`、`index`，优先级从高到低
+4. **工具返回结构化结果**：至少包含 `success`、`tabId`、`target`、`snapshotSummary`、`error`
 5. **默认不截图**：`browser_screenshot` 为显式工具，不作为常规读取手段
 6. **默认不抓完整 HTML**：全量 DOM 视为调试级工具，与正常 snapshot 分离
 
@@ -90,18 +90,19 @@ Native Messaging 的优势：
 #### 扩展内保留的能力
 
 - 标签页识别与切换
-- 页面导航（打开、后退、刷新）
+- 扩展自身 reload
+- 页面打开
 - 页面快照与元素查询
-- 点击 / 悬停 / 输入 / 清空 / 选择 / 滚动 / 按键
 - 显式等待（元素出现 / 文本出现 / 导航完成 / 元素消失）
 - 截图
-- 文件下载与保存
-- 基础风控节奏控制（`src/rateLimit.ts`）
+- Cookies 读取
+- 只读文件相关语义识别（上传控件 / 下载链接）
 
 #### 已从扩展中移出的能力（放到 Codex / MCP client 侧）
 
 - 扩展内置 LLM 对话主循环
 - 工作流引擎
+- 页面交互执行链路（真实鼠标/键盘/文件操作）
 - 业务场景模板（招聘、小红书等）
 - 子代理系统
 - 持久记忆与会话记忆系统
@@ -116,11 +117,10 @@ Native Messaging 的优势：
 
 1. Codex 能枚举并选择浏览器标签页
 2. 能读取页面快照而不依赖截图
-3. 能通过 `ref` / `selector` / `text` 三种方式定位并操作元素
-4. 能通过显式 wait 工具稳定等待页面变化
-5. 能在真实登录态页面上执行多步骤流程
-6. 能把结果保存到本地文件
-7. 整个链路不依赖 localhost HTTP / WebSocket
+3. 能通过 `ref` / `selector` / `text` 三种方式稳定定位元素
+4. `browser_snapshot` 返回的 `clickPoint` 落在真实可命中区域内，且不是固定中心点
+5. 能通过显式 wait 工具稳定等待页面变化
+6. 整个链路不依赖 localhost HTTP / WebSocket
 
 ---
 
@@ -129,10 +129,9 @@ Native Messaging 的优势：
 先用小场景验收，不要从完整业务流程切入：
 
 1. 打开指定页面
-2. 定位搜索框
-3. 输入关键词
-4. 等待结果列表出现
-5. 提取前 10 条标题和链接
-6. 保存为 JSON 文件
+2. 抓取 snapshot
+3. 校验目标页上下文、坐标和 `clickPoint`
+4. 等待指定文本或元素出现
+5. 提取目标元素和页面结构化数据
 
 此流程稳定通过后，再进入招聘、沟通、简历处理等更复杂场景。

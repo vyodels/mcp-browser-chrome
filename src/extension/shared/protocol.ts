@@ -64,6 +64,7 @@ export interface WaitForConditionResponse {
 export type BrowserCommandName =
   | 'browser_list_tabs'
   | 'browser_get_active_tab'
+  | 'browser_reload_extension'
   | 'browser_select_tab'
   | 'browser_open_tab'
   | 'browser_snapshot'

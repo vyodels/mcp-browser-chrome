@@ -79,6 +79,7 @@ P0 已接入：
 
 - `browser_list_tabs`
 - `browser_get_active_tab`
+- `browser_reload_extension`
 - `browser_select_tab`
 - `browser_open_tab`
 - `browser_snapshot`
@@ -154,8 +155,6 @@ npm run setup:auto
 - 自动把 [mcp/server.mjs](/Users/vyodels/AgentProjects/mcp-browser-chrome/mcp/server.mjs) 注册到 `~/.codex/config.toml`
 - 输出安装摘要和校验结果
 
-项目现在在 [manifest.json](/Users/vyodels/AgentProjects/mcp-browser-chrome/manifest.json) 中固定了扩展 `key`，后续 unpacked 扩展 ID 会稳定，不会因为重新加载而漂移。
-
 执行成功后会生成：
 
 - `~/Library/Application Support/Google/Chrome/NativeMessagingHosts/com.vyodels.browser_mcp.json`
@@ -163,7 +162,7 @@ npm run setup:auto
 manifest 里最关键的是两项：
 
 - `path` 必须指向当前仓库生成的 launcher，而不是依赖 shell 环境去解析 `node`
-- `allowed_origins` 必须包含当前扩展 ID。安装脚本会兼容当前已加载 ID 和稳定 ID。
+- `allowed_origins` 必须包含当前扩展 ID。安装脚本会从 Chrome 当前已加载的 `dist/` 记录里解析实际 ID。
 
 安装脚本现在会额外生成：
 
@@ -172,12 +171,7 @@ manifest 里最关键的是两项：
 这个 launcher 会把当前机器上的 Node 绝对路径写进去，再启动 [native-host/host.mjs](/Users/vyodels/AgentProjects/mcp-browser-chrome/native-host/host.mjs)。
 这样 Chrome 启动 Native Messaging Host 时不依赖 `nvm`、shell profile 或 `PATH`，换电脑后只要重新执行 `npm run setup:auto` 即可。
 
-如果你是从旧版本升级到这个版本：
-
-1. 打开 `chrome://extensions`
-2. 对当前 `browser-mcp` 扩展点一次“重新加载”
-
-这一步只需要做一次，用来让 Chrome 接受新的稳定扩展 ID。完成后后续重载不应再需要重新绑定。
+如果你刚完成一次新的 `dist/` 构建，需要让 Chrome 载入最新扩展代码。现在推荐直接调用 `browser_reload_extension`；如果 MCP 链路尚未接通，再手动去 `chrome://extensions` 点一次“重新加载”。
 
 ---
 
@@ -228,7 +222,7 @@ npm run native-host:stdio
 
 1. `npm run setup:auto` 是否执行成功
 2. Chrome 是否真的加载了 `dist/`
-3. 如果是旧版本升级，是否在 `chrome://extensions` 里重载过一次扩展
+3. 最近是否把新 `dist/` 载入当前扩展实例（优先 `browser_reload_extension`，不通时再去 `chrome://extensions` 手动 reload）
 4. Chrome 打开普通网页后，扩展是否已自动拉起 native host
 5. MCP client 调用 tool 时，`mcp/server.mjs` 是否报 `Native host unavailable`
 
@@ -240,7 +234,8 @@ npm run native-host:stdio
 - 明明扩展加载了，但 MCP tool 还是超时
   - 常见原因是扩展仍处于旧实例，或 native host 启动路径配置错误
   - 先打开一个普通网页，再看一次
-  - 如果是从旧版本升级，去 `chrome://extensions` 重载一次扩展
+  - 先用 `browser_reload_extension`
+  - 如果 MCP 本身还没接上，再去 `chrome://extensions` 手动 reload 一次
 
 - 扩展明明加载了，但没有任何响应
   - 大概率是 Native Messaging manifest 没装，或者扩展 ID 变了
@@ -268,7 +263,9 @@ npm run codex:mcp:install
 - 不使用 `localhost HTTP/WebSocket` 作为扩展桥接主通道
 - 不在页面主 world 常驻注入桥接脚本
 - 内容脚本优先在 isolated world 执行
-- snapshot 默认只返回只读结构化数据，`debug DOM` 单独调用
+- snapshot 默认只返回只读结构化数据，`viewport` 提供 `devicePixelRatio` / `screenX/Y` / `visualViewport` 便于上游换算屏幕坐标，返回顶层还会带 `tabId / windowId / url / title`
+- `clickables` 每项附带 16 位稳定 `signature`、`hitTestState`，以及位于真实生效区域内的随机 `clickPoint`
+- 上传 / 下载控件会额外带 `type` / `accept` / `multiple` / `download` 等语义字段，便于上游判断文件相关能力
 - 不产生页面可观察的合成交互事件
 
 注意：

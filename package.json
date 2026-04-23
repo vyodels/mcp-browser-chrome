@@ -7,6 +7,7 @@
     "dev": "vite build --watch",
     "build": "vite build",
     "typecheck": "tsc --noEmit",
+    "acceptance:complex-layout": "node scripts/verify-complex-layout.mjs",
     "setup:auto": "node scripts/setup-auto.mjs",
     "mcp:start": "node mcp/server.mjs",
     "native-host:start": "node native-host/host.mjs --debug-standalone",

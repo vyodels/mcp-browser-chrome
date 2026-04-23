@@ -9,11 +9,13 @@ const SOCKET_PATH = process.env.MCP_BROWSER_CHROME_SOCKET || path.join(os.tmpdir
 const SERVER_INFO = { name: 'browser-mcp', version: '1.0.0' }
 const PROTOCOL_VERSION = '2024-11-05'
 const BRIDGE_TIMEOUT_MS = Number(process.env.MCP_BROWSER_CHROME_BRIDGE_TIMEOUT_MS || 8000)
+const BRIDGE_TIMEOUT_GRACE_MS = 1500
 const BRIDGE_RETRY_DELAYS_MS = [150, 500, 1200]
 
 const TOOLS = [
   ['browser_list_tabs', 'List open tabs across Chrome windows. Pass currentWindowOnly=true to restrict results to the focused window.', { currentWindowOnly: { type: 'boolean' } }],
   ['browser_get_active_tab', 'Get the active Chrome tab.', {}],
+  ['browser_reload_extension', 'Reload the browser-mcp Chrome extension so new dist files take effect.', {}],
   ['browser_select_tab', 'Activate and focus a Chrome tab by tabId.', { tabId: { type: 'number' } }],
   ['browser_open_tab', 'Open a tab with an optional URL.', { url: { type: 'string' }, active: { type: 'boolean' } }],
   ['browser_snapshot', 'Read a structured page snapshot with viewport/document metadata and clickable element coordinates.', { tabId: { type: 'number' }, includeHtml: { type: 'boolean' }, includeText: { type: 'boolean' }, maxTextLength: { type: 'number' }, maxHtmlLength: { type: 'number' }, clickableLimit: { type: 'number' } }],
@@ -137,12 +139,19 @@ function isRetryableBridgeError(message) {
   ].some((fragment) => message.includes(fragment))
 }
 
+function resolveBridgeTimeoutMs(args = {}) {
+  const requestedTimeout = Number(args.timeoutMs)
+  if (!Number.isFinite(requestedTimeout) || requestedTimeout <= 0) return BRIDGE_TIMEOUT_MS
+  return Math.max(BRIDGE_TIMEOUT_MS, requestedTimeout + BRIDGE_TIMEOUT_GRACE_MS)
+}
+
 function callBridgeOnce(name, args = {}) {
   return new Promise((resolve, reject) => {
     const socket = createConnection(SOCKET_PATH)
     let buffer = ''
     const requestId = randomUUID()
     let settled = false
+    const bridgeTimeoutMs = resolveBridgeTimeoutMs(args)
 
     const fail = (error) => {
       if (settled) return
@@ -158,7 +167,7 @@ function callBridgeOnce(name, args = {}) {
       socket.end()
     }
 
-    socket.setTimeout(BRIDGE_TIMEOUT_MS)
+    socket.setTimeout(bridgeTimeoutMs)
 
     socket.on('connect', () => {
       socket.write(`${JSON.stringify({ id: requestId, type: 'browser_command', command: { name, arguments: args } })}\n`)
@@ -196,7 +205,7 @@ function callBridgeOnce(name, args = {}) {
     })
 
     socket.on('timeout', () => {
-      fail(new Error(`Bridge call timed out after ${BRIDGE_TIMEOUT_MS}ms via ${SOCKET_PATH}`))
+      fail(new Error(`Bridge call timed out after ${bridgeTimeoutMs}ms via ${SOCKET_PATH}`))
     })
   })
 }

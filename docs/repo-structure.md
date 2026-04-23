@@ -21,7 +21,6 @@ tsconfig.json
 
 src/background.ts
 src/content.ts
-src/rateLimit.ts
 src/types.ts
 src/extension/
 
@@ -30,11 +29,14 @@ native-host/host.mjs
 scripts/install-codex-mcp.mjs
 scripts/install-native-host.mjs
 scripts/setup-auto.mjs
+scripts/complex-layout-fixture.mjs
+scripts/verify-complex-layout.mjs
 
 icons/
 README.md
 docs/project-prompt.md
 docs/repo-structure.md
+docs/specs/2026-04-24-browser-mcp-complex-layout-acceptance_cn.md
 ```
 
 ### 非核心遗留，已归档到 `src/deprecated/`
@@ -169,20 +171,6 @@ TypeScript 编译配置。
 
 - `MCP 核心`
 
-### `src/rateLimit.ts`
-
-低痕执行辅助。
-
-作用：
-
-- 操作节奏控制
-- 随机延迟
-- 鼠标移动模拟
-
-分类：
-
-- `MCP 核心`
-
 ### `src/types.ts`
 
 共享类型定义。
@@ -190,12 +178,12 @@ TypeScript 编译配置。
 作用：
 
 - 扩展消息类型
-- 页面快照和交互元素类型
-- 仍然残留一部分旧 Agent 类型，后续可以继续瘦身
+- 页面快照、只读定位、`signature` / `hitTestState` / `clickPoint` 等共享类型
+- 顶层返回的目标页上下文（`tabId` / `windowId` / `url` / `title`）
 
 分类：
 
-- `MCP 核心，但需要继续清理旧类型`
+- `MCP 核心`
 
 ---
 
@@ -226,7 +214,8 @@ TypeScript 编译配置。
 
 - background 主路由
 - 把 `browser_*` 命令映射到 Chrome API 或 content script
-- 这里是扩展侧 MCP 能力真正的分发中心
+- 补充 `tabId` / `windowId` / `url` / `title` 等目标页上下文
+- 支持 `browser_reload_extension`
 
 分类：
 
@@ -247,17 +236,6 @@ TypeScript 编译配置。
 ### `src/extension/content/`
 
 页面内执行层。
-
-#### `actions.ts`
-
-作用：
-
-- 点击、悬停、输入、清空、选择、按键、滚动、截图
-- 尽量模拟真人事件链
-
-分类：
-
-- `MCP 核心`
 
 #### `handlers.ts`
 
@@ -285,8 +263,11 @@ TypeScript 编译配置。
 作用：
 
 - 生成页面快照
-- 生成交互元素列表
-- 控制默认精简读取
+- 递归穿透同源 iframe 和 open shadow DOM
+- 生成只读 `clickables` 列表
+- 计算稳定 `signature`
+- 计算 `hitTestState`
+- 为当前真实可命中区域生成随机 `clickPoint`
 
 分类：
 
@@ -324,7 +305,7 @@ TypeScript 编译配置。
 
 - 定义 browser 命令名
 - 定义 Native Messaging bridge 请求/响应
-- 定义 snapshot/query/action/wait 的结构
+- 定义 snapshot/query/wait 的结构
 
 分类：
 
@@ -494,7 +475,6 @@ src/
   background.ts
   content.ts
   deprecated/
-  rateLimit.ts
   types.ts
   extension/
     background/
@@ -553,7 +533,7 @@ vite.config.ts
 作用：
 
 - 安装 Chrome Native Messaging manifest
-- 兼容当前已加载扩展 ID 和稳定扩展 ID
+- 从 Chrome 当前已加载的 `dist/` 记录里解析实际扩展 ID
 
 分类：
 
@@ -565,6 +545,39 @@ vite.config.ts
 
 - 一次执行构建、Native Messaging 安装、Codex MCP 注册
 - 输出安装摘要和校验结果
+
+分类：
+
+- `MCP 核心`
+
+### `scripts/complex-layout-fixture.mjs`
+
+作用：
+
+- 启动招聘 IM 语义的复杂布局本地夹具
+- 覆盖 iframe、nested iframe、shadow DOM、modal、上传/下载、局部遮挡、异形控件等场景
+
+分类：
+
+- `MCP 核心`
+
+### `scripts/verify-complex-layout.mjs`
+
+作用：
+
+- 自动拉起复杂布局夹具并调用 MCP 验证
+- 校验目标页上下文、坐标还原、`hitTestState` 和随机 `clickPoint`
+
+分类：
+
+- `MCP 核心`
+
+### `docs/specs/2026-04-24-browser-mcp-complex-layout-acceptance_cn.md`
+
+作用：
+
+- 记录招聘 IM 复杂布局验收规范
+- 定义 iframe / shadow / modal / 上传下载 / 随机点位的验收口径
 
 分类：
 

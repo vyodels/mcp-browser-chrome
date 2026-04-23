@@ -67,15 +67,15 @@ Codex / MCP Client
 
 ## MCP 工具列表（`browser_*`）
 
-只支持以下 15 个工具：
+只支持以下 16 个工具：
 
-`browser_list_tabs`、`browser_get_active_tab`、`browser_select_tab`、`browser_open_tab`、`browser_snapshot`、`browser_query_elements`、`browser_get_element`、`browser_debug_dom`、`browser_screenshot`、`browser_get_cookies`、`browser_wait_for_element`、`browser_wait_for_text`、`browser_wait_for_disappear`、`browser_wait_for_navigation`、`browser_wait_for_url`
+`browser_list_tabs`、`browser_get_active_tab`、`browser_reload_extension`、`browser_select_tab`、`browser_open_tab`、`browser_snapshot`、`browser_query_elements`、`browser_get_element`、`browser_debug_dom`、`browser_screenshot`、`browser_get_cookies`、`browser_wait_for_element`、`browser_wait_for_text`、`browser_wait_for_disappear`、`browser_wait_for_navigation`、`browser_wait_for_url`
 
 ---
 
 ## 快照与 Ref 系统
 
-`browser_snapshot` 现在返回只读载荷，包含 `viewport`、`document`、`clickables` 三部分。`clickables` 仅用于只读查询和定位，不再用于浏览器交互；`browser_query_elements` 和 `browser_get_element` 仍可能返回 ref，但这些 ref 不再驱动任何动作工具。`browser_debug_dom` 可按需获取详细 DOM 信息。
+`browser_snapshot` 现在返回只读载荷，包含 `viewport`、`document`、`clickables` 三部分；顶层结果还会带 `tabId` 和 `target.{tabId,windowId,url,title}`。`viewport` 里除了 `innerWidth/Height`、`scrollX/Y`，还提供 `devicePixelRatio`、`screenX/Y`（内容视口左上角在屏幕上的位置）和可选的 `visualViewport`（pinch-zoom 的 scale + offset），供上游做页面坐标 → 屏幕坐标的换算。每个 clickable 会附带 16 位稳定 `signature`、`hitTestState`，以及位于真实生效区域内的随机 `clickPoint`。文件相关元素还会附带 `type` / `accept` / `multiple` / `download` 等语义字段。`clickables` 仅用于只读查询和定位，不再用于浏览器交互；`browser_query_elements` 和 `browser_get_element` 仍可能返回 ref，但这些 ref 不再驱动任何动作工具。`browser_debug_dom` 可按需获取详细 DOM 信息。
 
 ---
 
@@ -87,7 +87,7 @@ Codex / MCP Client
 - 不保留页面交互辅助层；运行时只做只读查询和 tab 级控制
 - HTML 不允许内联事件处理器（CSP），所有监听器通过 TS 文件 `addEventListener` 注册
 - Unix socket 路径：`path.join(os.tmpdir(), 'browser-mcp.sock')`，不可硬编码为 `/tmp/browser-mcp.sock`
-- `manifest.json` 中扩展 `key` 已固定，unpacked 扩展 ID 不会因重新加载漂移
+- 新构建生效优先走 `browser_reload_extension`；如果 MCP 链路尚未接通，再手动去 `chrome://extensions` reload 当前 unpacked 扩展
 
 ---
 
@@ -97,7 +97,7 @@ Codex / MCP Client
 
 1. `npm run setup:auto` 是否执行成功
 2. Chrome 是否真正加载了 `dist/` 目录下的扩展
-3. 如果是从旧版本升级，是否在 `chrome://extensions` 里手动重载过一次扩展（只需一次）
+3. 最近是否已通过 `browser_reload_extension` 或 `chrome://extensions` reload 当前 unpacked 扩展
 4. 是否打开了至少一个普通网页（用于唤醒 background service worker）
 5. MCP client 调用工具时，`mcp/server.mjs` 是否输出 `Native host unavailable`
 

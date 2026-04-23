@@ -2,6 +2,17 @@ import type { BrowserCommand, SnapshotRequest } from '../shared/protocol'
 import { relayToContentScript, resolveTab } from './contentBridge'
 import { createNativeHostBridge } from './nativeHost'
 
+function describeTargetTab(tab: chrome.tabs.Tab) {
+  return {
+    tabId: tab.id,
+    windowId: tab.windowId,
+    url: tab.url ?? '',
+    title: tab.title ?? '',
+    active: !!tab.active,
+    index: tab.index ?? 0,
+  }
+}
+
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, errorMessage: string): Promise<T> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error(errorMessage)), timeoutMs)
@@ -42,6 +53,7 @@ async function captureTabScreenshot(targetTabId?: number) {
     success: true,
     tabId: target.id,
     windowId: target.windowId,
+    target: describeTargetTab(target),
     screenshotDataUrl: dataUrl,
   }
 }
@@ -131,6 +143,18 @@ async function executeBrowserCommand(command: BrowserCommand): Promise<unknown> 
       }
     }
 
+    case 'browser_reload_extension': {
+      const tabs = await chrome.tabs.query({ active: true, currentWindow: true })
+      const tab = tabs[0]
+      const target = tab?.id ? describeTargetTab(tab) : undefined
+      setTimeout(() => chrome.runtime.reload(), 150)
+      return {
+        success: true,
+        reloading: true,
+        target,
+      }
+    }
+
     case 'browser_select_tab': {
       const tabId = Number(args.tabId)
       const tab = await chrome.tabs.get(tabId)
@@ -167,7 +191,7 @@ async function executeBrowserCommand(command: BrowserCommand): Promise<unknown> 
         { type: 'BROWSER_SNAPSHOT', payload: args as SnapshotRequest },
       )
       if (!result.success) return { success: false, error: result.error }
-      return { ...(result.response ?? {}), tabId: target.id }
+      return { ...(result.response ?? {}), tabId: target.id, target: describeTargetTab(target) }
     }
 
     case 'browser_debug_dom': {
@@ -179,7 +203,7 @@ async function executeBrowserCommand(command: BrowserCommand): Promise<unknown> 
         { type: 'DEBUG_DOM' },
       )
       if (!result.success) return { success: false, error: result.error }
-      return { ...(result.response ?? {}), tabId: target.id }
+      return { ...(result.response ?? {}), tabId: target.id, target: describeTargetTab(target) }
     }
 
     case 'browser_query_elements':
@@ -197,7 +221,7 @@ async function executeBrowserCommand(command: BrowserCommand): Promise<unknown> 
         error?: string
       }>(target, { type: 'QUERY_ELEMENTS', payload })
       if (!result.success) return { success: false, error: result.error }
-      return { ...(result.response ?? {}), tabId: target.id }
+      return { ...(result.response ?? {}), tabId: target.id, target: describeTargetTab(target) }
     }
 
     case 'browser_wait_for_element':
@@ -216,7 +240,7 @@ async function executeBrowserCommand(command: BrowserCommand): Promise<unknown> 
         payload: args,
       })
       if (!result.success) return { success: false, error: result.error }
-      return { ...(result.response as object), tabId: target.id }
+      return { ...(result.response as object), tabId: target.id, target: describeTargetTab(target) }
     }
 
     case 'browser_wait_for_navigation': {
