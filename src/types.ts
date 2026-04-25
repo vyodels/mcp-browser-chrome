@@ -20,6 +20,8 @@ export interface Message {
 export interface SnapshotViewport {
   innerWidth: number
   innerHeight: number
+  outerWidth: number
+  outerHeight: number
   scrollX: number
   scrollY: number
   devicePixelRatio: number
@@ -54,12 +56,24 @@ export interface ClickablePoint {
   document: ElementPoint
 }
 
+export interface InaccessibleFrameRegion {
+  framePath: string
+  reason: 'cross_origin'
+  host?: string
+  name?: string
+  title?: string
+  viewport: ElementRect
+  document: ElementRect
+  inViewport: boolean
+}
+
 export interface PageSnapshot {
   url: string
   title: string
   viewport: SnapshotViewport
   document: SnapshotDocument
   clickables: ClickableElement[]
+  inaccessibleFrames: InaccessibleFrameRegion[]
   text?: string
   html?: string
 }
@@ -72,6 +86,8 @@ export interface ClickableElement {
   tag: string
   role?: string
   text: string
+  value?: string
+  placeholder?: string
   ariaLabel?: string
   href?: string
   download?: string
@@ -79,6 +95,12 @@ export interface ClickableElement {
   type?: string
   accept?: string
   multiple?: boolean
+  disabled?: boolean
+  readonly?: boolean
+  checked?: boolean
+  selected?: boolean
+  expanded?: boolean
+  focused?: boolean
   viewport: ElementRect
   document: ElementRect
   inViewport: boolean

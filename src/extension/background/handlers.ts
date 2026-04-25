@@ -2,6 +2,36 @@ import type { BrowserCommand, SnapshotRequest } from '../shared/protocol'
 import { relayToContentScript, resolveTab } from './contentBridge'
 import { createNativeHostBridge } from './nativeHost'
 
+const DEFAULT_DOWNLOAD_LOCATE_LIMIT = 10
+const DEFAULT_DOWNLOAD_LOCATE_WAIT_MS = 0
+const DEFAULT_DOWNLOAD_LOCATE_POLL_MS = 500
+const MAX_DOWNLOAD_LOCATE_WAIT_MS = 3_000
+
+type DownloadState = 'in_progress' | 'interrupted' | 'complete'
+
+type DownloadSourceMatch = {
+  input: string
+  field: 'url' | 'finalUrl' | 'referrer'
+  mode: 'exact' | 'regex'
+  value: string
+}
+
+type DownloadSourceCriteria = {
+  sourceUrls: string[]
+  sourceUrlRegexes: string[]
+  finalUrls: string[]
+  finalUrlRegexes: string[]
+  referrers: string[]
+  referrerRegexes: string[]
+  required: boolean
+}
+
+type DownloadFileNameMatch = {
+  input: string
+  mode: 'exact' | 'chrome_collision_suffix'
+  value: string
+}
+
 function describeTargetTab(tab: chrome.tabs.Tab) {
   return {
     tabId: tab.id,
@@ -11,6 +41,17 @@ function describeTargetTab(tab: chrome.tabs.Tab) {
     active: !!tab.active,
     index: tab.index ?? 0,
   }
+}
+
+async function getFocusedWindowId(): Promise<number | undefined> {
+  const focusedWindow = await chrome.windows.getLastFocused({ windowTypes: ['normal'] }).catch(() => null)
+  return focusedWindow?.id
+}
+
+async function getFocusedActiveTab(): Promise<chrome.tabs.Tab | undefined> {
+  const focusedWindowId = await getFocusedWindowId()
+  const tabs = await chrome.tabs.query(focusedWindowId ? { active: true, windowId: focusedWindowId } : { active: true, currentWindow: true })
+  return tabs[0]
 }
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, errorMessage: string): Promise<T> {
@@ -30,9 +71,21 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, errorMessage: st
 }
 
 async function captureTabScreenshot(targetTabId?: number) {
-  const target = await resolveTab(targetTabId)
+  const target = typeof targetTabId === 'number'
+    ? await chrome.tabs.get(targetTabId).catch(() => null)
+    : await getFocusedActiveTab()
   if (!target?.id || !target.windowId) {
     return { success: false, error: '没有活跃标签页' }
+  }
+  const [windowActiveTab] = await chrome.tabs.query({ active: true, windowId: target.windowId })
+  if (!target.active || windowActiveTab?.id !== target.id) {
+    return {
+      success: false,
+      error: 'browser_screenshot 只能截取目标窗口当前活跃标签页；请先显式调用 browser_select_tab 激活目标页',
+      tabId: target.id,
+      windowId: target.windowId,
+      target: describeTargetTab(target),
+    }
   }
 
   const dataUrl = await new Promise<string>((resolve, reject) => {
@@ -68,6 +121,17 @@ async function waitForNavigation(tabId: number, timeoutMs = 10_000): Promise<{
   error?: string
 }> {
   const start = Date.now()
+  const current = await chrome.tabs.get(tabId).catch(() => null)
+  if (current?.status === 'complete') {
+    return {
+      success: true,
+      matched: true,
+      elapsedMs: 0,
+      tabId,
+      url: current.url ?? '',
+      title: current.title ?? '',
+    }
+  }
 
   return withTimeout(new Promise<{
     success: boolean
@@ -101,6 +165,421 @@ async function waitForNavigation(tabId: number, timeoutMs = 10_000): Promise<{
   }))
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function asTrimmedString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined
+}
+
+function parseStringList(...values: unknown[]): string[] {
+  const results: string[] = []
+  for (const value of values) {
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        const normalized = asTrimmedString(item)
+        if (normalized) results.push(normalized)
+      }
+      continue
+    }
+    const normalized = asTrimmedString(value)
+    if (normalized) results.push(normalized)
+  }
+  return [...new Set(results)]
+}
+
+function asPositiveNumber(value: unknown, fallback: number): number {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback
+}
+
+function asNonNegativeNumber(value: unknown, fallback: number): number {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function basename(filePath: string): string {
+  const parts = filePath.split(/[\\/]/)
+  return parts[parts.length - 1] || filePath
+}
+
+function chromeDownloadFilenameRegex(fileName: string): string {
+  const leafName = basename(fileName)
+  const dot = leafName.lastIndexOf('.')
+  if (dot <= 0 || dot === leafName.length - 1) {
+    return `(^|[\\\\/])${escapeRegExp(leafName)}$`
+  }
+
+  const stem = leafName.slice(0, dot)
+  const extension = leafName.slice(dot)
+  const alreadyDisambiguated = / \(\d+\)$/.test(stem)
+  const escapedStem = escapeRegExp(stem)
+  const suffix = alreadyDisambiguated ? '' : '(?: \\(\\d+\\))?'
+  return `(^|[\\\\/])${escapedStem}${suffix}${escapeRegExp(extension)}$`
+}
+
+function fileNameMatch(item: chrome.downloads.DownloadItem, expectedFileName: string | undefined): DownloadFileNameMatch | undefined {
+  if (!expectedFileName) return undefined
+  const expected = basename(expectedFileName)
+  const actual = basename(item.filename)
+  if (actual === expected) {
+    return { input: expected, mode: 'exact', value: actual }
+  }
+
+  const dot = expected.lastIndexOf('.')
+  if (dot <= 0 || dot === expected.length - 1) return undefined
+  const stem = expected.slice(0, dot)
+  const extension = expected.slice(dot)
+  if (new RegExp(`^${escapeRegExp(stem)} \\(\\d+\\)${escapeRegExp(extension)}$`).test(actual)) {
+    return { input: expected, mode: 'chrome_collision_suffix', value: actual }
+  }
+  return undefined
+}
+
+function normalizeExtension(value: string): string {
+  return value.trim().replace(/^\./, '').toLowerCase()
+}
+
+function parseExpectedExtensions(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => typeof item === 'string' ? normalizeExtension(item) : '')
+      .filter(Boolean)
+  }
+  if (typeof value === 'string') {
+    return value
+      .split(',')
+      .map(normalizeExtension)
+      .filter(Boolean)
+  }
+  return []
+}
+
+function parseDownloadStates(value: unknown): DownloadState[] {
+  const allowed = new Set(['in_progress', 'interrupted', 'complete'])
+  const values = Array.isArray(value) ? value : (typeof value === 'string' ? value.split(',') : [])
+  return values
+    .map((item) => typeof item === 'string' ? item.trim() : '')
+    .filter((item): item is DownloadState => allowed.has(item))
+}
+
+function fileExtension(filePath: string): string {
+  const name = basename(filePath)
+  const dot = name.lastIndexOf('.')
+  return dot >= 0 ? name.slice(dot + 1).toLowerCase() : ''
+}
+
+function normalizeIsoTime(value: unknown): string | undefined {
+  const raw = asTrimmedString(value)
+  if (!raw) return undefined
+  const date = new Date(raw)
+  return Number.isNaN(date.getTime()) ? undefined : date.toISOString()
+}
+
+function parseDownloadSourceCriteria(args: Record<string, unknown>): DownloadSourceCriteria {
+  const sourceUrls = parseStringList(
+    args.sourceUrl,
+    args.sourceUrls,
+    args.sourceUrlCandidates,
+    args.downloadUrl,
+    args.downloadUrls,
+    args.href,
+  )
+  const sourceUrlRegexes = parseStringList(args.sourceUrlRegex, args.sourceUrlRegexes, args.downloadUrlRegex, args.hrefRegex)
+  const finalUrls = parseStringList(args.finalUrl, args.finalUrls)
+  const finalUrlRegexes = parseStringList(args.finalUrlRegex, args.finalUrlRegexes)
+  const referrers = parseStringList(args.referrer, args.referrers)
+  const referrerRegexes = parseStringList(args.referrerRegex, args.referrerRegexes)
+  const required = args.requireSourceCorrelation === true
+    || sourceUrls.length > 0
+    || sourceUrlRegexes.length > 0
+    || finalUrls.length > 0
+    || finalUrlRegexes.length > 0
+    || referrers.length > 0
+    || referrerRegexes.length > 0
+  return {
+    sourceUrls,
+    sourceUrlRegexes,
+    finalUrls,
+    finalUrlRegexes,
+    referrers,
+    referrerRegexes,
+    required,
+  }
+}
+
+function regexMatches(value: string | undefined, pattern: string): boolean {
+  if (!value) return false
+  try {
+    return new RegExp(pattern).test(value)
+  } catch {
+    return false
+  }
+}
+
+function exactMatches(value: string | undefined, expected: string): boolean {
+  return !!value && value === expected
+}
+
+function sourceMatch(
+  item: chrome.downloads.DownloadItem,
+  criteria: DownloadSourceCriteria,
+): DownloadSourceMatch | undefined {
+  for (const expected of criteria.sourceUrls) {
+    if (exactMatches(item.url, expected)) return { input: expected, field: 'url', mode: 'exact', value: item.url }
+    if (exactMatches(item.finalUrl, expected)) return { input: expected, field: 'finalUrl', mode: 'exact', value: item.finalUrl }
+  }
+  for (const pattern of criteria.sourceUrlRegexes) {
+    if (regexMatches(item.url, pattern)) return { input: pattern, field: 'url', mode: 'regex', value: item.url }
+    if (regexMatches(item.finalUrl, pattern)) return { input: pattern, field: 'finalUrl', mode: 'regex', value: item.finalUrl }
+  }
+  for (const expected of criteria.finalUrls) {
+    if (exactMatches(item.finalUrl, expected)) return { input: expected, field: 'finalUrl', mode: 'exact', value: item.finalUrl }
+  }
+  for (const pattern of criteria.finalUrlRegexes) {
+    if (regexMatches(item.finalUrl, pattern)) return { input: pattern, field: 'finalUrl', mode: 'regex', value: item.finalUrl }
+  }
+  for (const expected of criteria.referrers) {
+    if (exactMatches(item.referrer, expected)) return { input: expected, field: 'referrer', mode: 'exact', value: item.referrer }
+  }
+  for (const pattern of criteria.referrerRegexes) {
+    if (regexMatches(item.referrer, pattern)) return { input: pattern, field: 'referrer', mode: 'regex', value: item.referrer }
+  }
+  return undefined
+}
+
+function matchesDownloadSource(item: chrome.downloads.DownloadItem, criteria: DownloadSourceCriteria): boolean {
+  if (!criteria.required) return true
+  return !!sourceMatch(item, criteria)
+}
+
+function compactSourceCriteria(criteria: DownloadSourceCriteria) {
+  return {
+    sourceUrls: criteria.sourceUrls,
+    sourceUrlRegexes: criteria.sourceUrlRegexes,
+    finalUrls: criteria.finalUrls,
+    finalUrlRegexes: criteria.finalUrlRegexes,
+    referrers: criteria.referrers,
+    referrerRegexes: criteria.referrerRegexes,
+    required: criteria.required,
+  }
+}
+
+function compactDownloadItem(item: chrome.downloads.DownloadItem) {
+  return {
+    id: item.id,
+    url: item.url,
+    finalUrl: item.finalUrl,
+    referrer: item.referrer,
+    filename: item.filename,
+    fileName: basename(item.filename),
+    extension: fileExtension(item.filename),
+    mime: item.mime,
+    state: item.state,
+    exists: item.exists,
+    danger: item.danger,
+    paused: item.paused,
+    canResume: item.canResume,
+    error: item.error,
+    bytesReceived: item.bytesReceived,
+    totalBytes: item.totalBytes,
+    fileSize: item.fileSize,
+    startTime: item.startTime,
+    endTime: item.endTime,
+    estimatedEndTime: item.estimatedEndTime,
+    byExtensionId: item.byExtensionId,
+    byExtensionName: item.byExtensionName,
+    incognito: item.incognito,
+  }
+}
+
+function downloadIsSafe(item: chrome.downloads.DownloadItem): boolean {
+  return !item.danger || item.danger === 'safe' || item.danger === 'accepted'
+}
+
+function matchesLocatedArtifact(
+  item: chrome.downloads.DownloadItem,
+  criteria: {
+    expectedExtensions: string[]
+    states: DownloadState[]
+    requireExists: boolean
+    requireComplete: boolean
+    requireSafe: boolean
+    source: DownloadSourceCriteria
+  },
+): boolean {
+  if (criteria.states.length && !criteria.states.includes(item.state)) return false
+  if (criteria.requireComplete && item.state !== 'complete') return false
+  if (criteria.requireExists && item.exists !== true) return false
+  if (criteria.requireSafe && !downloadIsSafe(item)) return false
+  if (criteria.expectedExtensions.length && !criteria.expectedExtensions.includes(fileExtension(item.filename))) return false
+  if (!matchesDownloadSource(item, criteria.source)) return false
+  return true
+}
+
+async function locateDownload(args: Record<string, unknown>) {
+  if (!chrome.downloads?.search) {
+    return { success: false, found: false, located: false, error: 'chrome.downloads API unavailable; extension must include downloads permission' }
+  }
+
+  const downloadId = Number(args.downloadId)
+  const hasDownloadId = Number.isInteger(downloadId) && downloadId > 0
+  const fileName = asTrimmedString(args.fileName) ?? asTrimmedString(args.filename)
+  const filenameRegex = asTrimmedString(args.filenameRegex)
+  const url = asTrimmedString(args.url)
+  const urlRegex = asTrimmedString(args.urlRegex)
+  const queryText = asTrimmedString(args.query)
+  const source = parseDownloadSourceCriteria(args)
+  const startedAfter = normalizeIsoTime(args.startedAfter ?? args.since)
+  const endedAfter = normalizeIsoTime(args.endedAfter)
+  const expectedExtensions = parseExpectedExtensions(args.expectedExtensions)
+  const states = parseDownloadStates(args.states ?? args.state)
+  const requireExists = args.requireExists === true
+  const requireComplete = args.requireComplete === true
+  const requireSafe = args.requireSafe === true
+  const requireUnique = args.requireUnique === true
+  const allowAmbiguous = args.allowAmbiguous === true
+  const limit = Math.min(Math.max(Math.floor(asPositiveNumber(args.limit, DEFAULT_DOWNLOAD_LOCATE_LIMIT)), 1), 50)
+  const waitMs = Math.min(Math.floor(asNonNegativeNumber(args.waitMs, DEFAULT_DOWNLOAD_LOCATE_WAIT_MS)), MAX_DOWNLOAD_LOCATE_WAIT_MS)
+  const pollIntervalMs = Math.min(Math.floor(asPositiveNumber(args.pollIntervalMs, DEFAULT_DOWNLOAD_LOCATE_POLL_MS)), 5_000)
+
+  const hasSelector = hasDownloadId
+    || !!fileName
+    || !!filenameRegex
+    || !!url
+    || !!urlRegex
+    || !!queryText
+    || source.required
+    || !!startedAfter
+    || !!endedAfter
+
+  if (!hasSelector) {
+    return {
+      success: false,
+      found: false,
+      located: false,
+      error: 'browser_locate_download requires at least one selector: downloadId, fileName, filenameRegex, url, urlRegex, sourceUrl, finalUrl, referrer, query, startedAfter, or endedAfter',
+    }
+  }
+
+  const query: chrome.downloads.DownloadQuery = {
+    limit,
+    orderBy: ['-startTime'],
+  }
+  if (hasDownloadId) query.id = downloadId
+  if (fileName) query.filenameRegex = chromeDownloadFilenameRegex(fileName)
+  else if (filenameRegex) query.filenameRegex = filenameRegex
+  if (url) query.url = url
+  else if (
+    source.sourceUrls.length === 1
+    && !fileName
+    && !filenameRegex
+    && !queryText
+    && !startedAfter
+    && !endedAfter
+  ) {
+    query.url = source.sourceUrls[0]
+  }
+  if (urlRegex) query.urlRegex = urlRegex
+  else if (
+    source.sourceUrlRegexes.length === 1
+    && !fileName
+    && !filenameRegex
+    && !queryText
+    && !startedAfter
+    && !endedAfter
+  ) {
+    query.urlRegex = source.sourceUrlRegexes[0]
+  }
+  if (queryText) query.query = [queryText]
+  if (startedAfter) query.startedAfter = startedAfter
+  if (endedAfter) query.endedAfter = endedAfter
+  if (requireComplete) query.state = 'complete'
+  else if (states.length === 1) query.state = states[0]
+
+  const startedAt = Date.now()
+  let items: chrome.downloads.DownloadItem[] = []
+  let locatedItem: chrome.downloads.DownloadItem | undefined
+  let candidateItems: chrome.downloads.DownloadItem[] = []
+  let ambiguous = false
+
+  while (true) {
+    items = await chrome.downloads.search(query)
+    candidateItems = items.filter((item) => matchesLocatedArtifact(item, {
+      expectedExtensions,
+      states,
+      requireExists,
+      requireComplete,
+      requireSafe,
+      source,
+    }))
+    ambiguous = candidateItems.length > 1
+    locatedItem = ambiguous && requireUnique && !allowAmbiguous ? undefined : candidateItems[0]
+    if (locatedItem || Date.now() - startedAt >= waitMs) break
+    await sleep(pollIntervalMs)
+  }
+
+  const matches = items.map(compactDownloadItem)
+  const candidates = candidateItems.map((item) => ({
+    ...compactDownloadItem(item),
+    fileNameMatch: fileNameMatch(item, fileName),
+    sourceCorrelation: sourceMatch(item, source),
+  }))
+  const located = locatedItem
+    ? {
+        ...compactDownloadItem(locatedItem),
+        fileNameMatch: fileNameMatch(locatedItem, fileName),
+        sourceCorrelation: sourceMatch(locatedItem, source),
+      }
+    : undefined
+  return {
+    success: true,
+    found: matches.length > 0,
+    located: !!located,
+    ambiguous,
+    artifact: located,
+    candidates,
+    matches,
+    count: matches.length,
+    candidateCount: candidateItems.length,
+    elapsedMs: Date.now() - startedAt,
+    sourceCorrelation: {
+      expected: compactSourceCriteria(source),
+      matched: locatedItem ? sourceMatch(locatedItem, source) : undefined,
+      required: source.required,
+      ambiguous,
+    },
+    criteria: {
+      downloadId: hasDownloadId ? downloadId : undefined,
+      fileName,
+      requestedFilenameRegex: filenameRegex,
+      filenameRegex: query.filenameRegex,
+      url,
+      urlRegex,
+      source: compactSourceCriteria(source),
+      query: queryText,
+      startedAfter,
+      endedAfter,
+      expectedExtensions,
+      states,
+      requireExists,
+      requireComplete,
+      requireSafe,
+      requireUnique,
+      allowAmbiguous,
+      limit,
+      waitMs,
+      pollIntervalMs,
+      pathLocationEvidence: requireExists ? 'chrome.downloads.search.exists' : 'not_required',
+    },
+  }
+}
+
 async function executeBrowserCommand(command: BrowserCommand): Promise<unknown> {
   const args = command.arguments ?? {}
 
@@ -125,8 +604,7 @@ async function executeBrowserCommand(command: BrowserCommand): Promise<unknown> 
     }
 
     case 'browser_get_active_tab': {
-      const tabs = await chrome.tabs.query({ active: true, currentWindow: true })
-      const tab = tabs[0]
+      const tab = await getFocusedActiveTab()
       if (!tab?.id) return { success: false, error: '没有活跃标签页' }
 
       return {
@@ -144,8 +622,7 @@ async function executeBrowserCommand(command: BrowserCommand): Promise<unknown> 
     }
 
     case 'browser_reload_extension': {
-      const tabs = await chrome.tabs.query({ active: true, currentWindow: true })
-      const tab = tabs[0]
+      const tab = await getFocusedActiveTab()
       const target = tab?.id ? describeTargetTab(tab) : undefined
       setTimeout(() => chrome.runtime.reload(), 150)
       return {
@@ -164,14 +641,22 @@ async function executeBrowserCommand(command: BrowserCommand): Promise<unknown> 
     }
 
     case 'browser_open_tab': {
-      const created = await chrome.tabs.create({
-        url: typeof args.url === 'string' ? args.url : 'about:blank',
-        active: args.active !== false,
-      })
+      const url = typeof args.url === 'string' ? args.url : 'about:blank'
+      const active = args.active !== false
+      const targetTabId = typeof args.tabId === 'number' ? args.tabId : undefined
+      const requestedWindowId = typeof args.windowId === 'number' ? args.windowId : undefined
+      const focusedWindowId = requestedWindowId ?? await getFocusedWindowId()
+      const created = targetTabId
+        ? await chrome.tabs.update(targetTabId, { url, active })
+        : await chrome.tabs.create({ url, active, ...(focusedWindowId ? { windowId: focusedWindowId } : {}) })
+      if (active && created.windowId) {
+        await chrome.windows.update(created.windowId, { focused: true })
+      }
 
       return {
         success: true,
         tabId: created.id,
+        reused: !!targetTabId,
         tab: {
           id: created.id,
           url: created.url ?? '',
@@ -271,6 +756,9 @@ async function executeBrowserCommand(command: BrowserCommand): Promise<unknown> 
         })),
       }
     }
+
+    case 'browser_locate_download':
+      return await locateDownload(args)
 
     case 'browser_wait_for_url': {
       const target = await resolveTab(typeof args.tabId === 'number' ? args.tabId : undefined)

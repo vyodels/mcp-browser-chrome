@@ -6,7 +6,7 @@
 > 适用分支 / 提交：`main`（与备份 `feature/20260423-chrome-mcp` 对齐）
 > 验收对象：`mcp-browser-chrome` 这个 Chrome 扩展 + MCP 运行时栈
 > 验收目标：确认本轮只读化 + 隐身化重构的五项核心承诺成立
-> 1. 工具面只剩 15 个只读 / 标签页管理工具，调用全部可达
+> 1. 工具面只剩 17 个只读 / 标签页管理工具，调用全部可达；`browser_locate_download` 只读定位 Chrome 下载记录中的本地 artifact 路径与状态，不恢复浏览器内下载动作
 > 2. `browser_snapshot` 返回新协议（viewport / document / clickables / framePath / shadowDepth / detectedBy）
 > 3. 扩展不向页面暴露任何可被 JS 探测的痕迹（`chrome.runtime.id` 不可见、无 MAIN world 注入、无合成事件、无 `web_accessible_resources`、无 DOM 污染）
 > 4. 主流反自动化检测站点加载 `dist/` 之后的评分与 baseline 一致
@@ -72,7 +72,7 @@
 | 字段 | 期望值 | 判定 |
 |---|---|---|
 | `manifest_version` | `3` | 严格相等 |
-| `permissions` | `["activeTab", "tabs", "scripting", "nativeMessaging", "cookies"]`，**不允许更多** | 集合相等 |
+| `permissions` | `["activeTab", "tabs", "scripting", "nativeMessaging", "cookies", "downloads"]`，**不允许更多**；`downloads` 仅用于 background 只读查询下载记录 | 集合相等 |
 | `host_permissions` | `["<all_urls>"]` | 严格相等 |
 | `content_scripts[0].all_frames` | `false` | 严格相等 |
 | `content_scripts[0].matches` | `["<all_urls>"]` | 严格相等 |
@@ -123,13 +123,13 @@
 ### 2.8 MCP 工具注册表基数
 
 **执行：** 读取 `mcp/server.mjs`，数 `TOOLS` 数组长度
-**PASS 条件：** 恰好 `15` 个工具，且集合等于：
+**PASS 条件：** 恰好 `17` 个工具，且集合等于：
 
 ```
-browser_list_tabs, browser_get_active_tab, browser_select_tab, browser_open_tab,
+browser_list_tabs, browser_get_active_tab, browser_reload_extension, browser_select_tab, browser_open_tab,
 browser_snapshot, browser_query_elements, browser_get_element, browser_debug_dom,
 browser_wait_for_element, browser_wait_for_text, browser_wait_for_navigation,
-browser_wait_for_disappear, browser_screenshot, browser_get_cookies, browser_wait_for_url
+browser_wait_for_disappear, browser_screenshot, browser_get_cookies, browser_locate_download, browser_wait_for_url
 ```
 
 **FAIL 后果：** 阻塞
@@ -147,7 +147,7 @@ browser_wait_for_disappear, browser_screenshot, browser_get_cookies, browser_wai
 > Agent 以 MCP Client 身份调用本项目注册的 `browser_*` 工具完成验收。
 > 所有断言以工具返回的 `structuredContent` / JSON payload 为准。
 
-### 3.1 工具可达性 smoke（15/15）
+### 3.1 工具可达性 smoke（17/17）
 
 对每个工具用最小合法参数调用一次。以下表格里"参数"一列是 Agent 要传的最小集合。
 
@@ -155,7 +155,8 @@ browser_wait_for_disappear, browser_screenshot, browser_get_cookies, browser_wai
 |---|---|---|
 | `browser_list_tabs` | `{}` | `success === true` 且 `tabs.length ≥ 1` |
 | `browser_get_active_tab` | `{}` | `success === true` 且 `tab.id` 为数字 |
-| `browser_open_tab` | `{ url: "about:blank", active: false }` | `success === true` 且 `tabId` 为数字；记录 `scratchTabId` 供后续清理 |
+| `browser_reload_extension` | `{}` | 仅单步调试时人工执行；自动 acceptance 不应在运行中调用，避免 reload 断开当前 MCP/native-host 通道 |
+| `browser_open_tab` | 优先用 `{ tabId: <同一聚焦窗口内既有 scratch tab>, windowId: <focusedWindowId>, url: "about:blank", active: false }`；没有可复用 tab 时才用 `{ windowId: <focusedWindowId>, url: "about:blank", active: false }` | `success === true` 且 `tabId` 为数字；记录 `scratchTabId`，重复回归应复用该 tab 而不是持续新开 |
 | `browser_select_tab` | `{ tabId: <3.1.2 拿到的 active.id> }` | `success === true` |
 | `browser_snapshot` | `{}` | 详见 3.2 |
 | `browser_query_elements` | `{ selector: "a" }` | `success === true`，`matches` 为数组 |
@@ -166,10 +167,11 @@ browser_wait_for_disappear, browser_screenshot, browser_get_cookies, browser_wai
 | `browser_wait_for_disappear` | `{ selector: "#definitely-does-not-exist-xyz", timeoutMs: 500 }` | `matched === true` |
 | `browser_wait_for_navigation` | `{ timeoutMs: 500 }` | 超时返回 `matched === false`，不抛异常（阴性用例） |
 | `browser_wait_for_url` | `{ pattern: "http", timeoutMs: 500 }` | `matched === true` 或阴性但 `success ∈ {true,false}` 都接受 |
-| `browser_screenshot` | `{}` | `success === true` 且 `screenshotDataUrl` 以 `data:image/png;base64,` 起头 |
+| `browser_screenshot` | `{}` | 目标 tab 已活跃时 `success === true` 且 `screenshotDataUrl` 以 `data:image/png;base64,` 起头；inactive `tabId` 必须 `success === false`，避免截错活跃页 |
 | `browser_get_cookies` | `{}` | `success === true`，`cookies` 为数组 |
+| `browser_locate_download` | `{ sourceUrl: "https://example.invalid/no-such.pdf", expectedExtensions: ["pdf"], waitMs: 0 }` | `success === true` 且 `found === false`、`located === false`；可用 `sourceUrl/finalUrl/referrer + startedAfter` 关联 HID 点击来源和下载记录；可返回 `in_progress` / `interrupted` / `complete` 记录；不可打开 `chrome://downloads`，不可留下页面 JS 可见信号 |
 
-**PASS 条件：** 15 项全通过
+**PASS 条件：** 16 项自动调用全通过，`browser_reload_extension` 作为人工/单步调试工具单独记录。
 **清理：** 对 `scratchTabId` 调用 `chrome.tabs.remove` 是删除操作——此版本**没有**暴露 `browser_close_tab`，清理留给人工关闭；Agent 只需在日志里标记即可。
 
 ### 3.2 `browser_snapshot` 协议字段完整性
@@ -232,7 +234,7 @@ browser_query_elements({ ref: "@e1" })
 
 **步骤：**
 
-1. `browser_open_tab({ url: "https://bot.sannysoft.com/", active: true })` → 记录 `botTabId`
+1. 先 `browser_list_tabs` 查找既有 Sannysoft 检测 tab；再调用 `browser_open_tab({ tabId: <可选既有 tabId>, url: "https://bot.sannysoft.com/", active: true })` → 记录 `botTabId`
 2. `browser_wait_for_text({ tabId: botTabId, text: "Intoli.com", timeoutMs: 15000 })`
 3. `browser_wait_for_navigation({ tabId: botTabId, timeoutMs: 5000 })` （容忍超时）
 4. `browser_debug_dom({ tabId: botTabId })` → 拿到 `snapshot.html` + `snapshot.text`
@@ -262,7 +264,7 @@ browser_query_elements({ ref: "@e1" })
 
 **步骤：**
 
-1. `browser_open_tab({ url: "https://arh.antoinevastel.com/bots/areyouheadless", active: true })`
+1. 先 `browser_list_tabs` 查找既有 Are You Headless 检测 tab；再调用 `browser_open_tab({ tabId: <可选既有 tabId>, url: "https://arh.antoinevastel.com/bots/areyouheadless", active: true })`
 2. `browser_wait_for_text({ text: "headless", timeoutMs: 10000 })`
 3. `browser_debug_dom({})` → 拿 `snapshot.text`
 
@@ -274,7 +276,7 @@ browser_query_elements({ ref: "@e1" })
 
 **步骤：**
 
-1. `browser_open_tab({ url: "https://abrahamjuliot.github.io/creepjs/", active: true })`
+1. 先 `browser_list_tabs` 查找既有 CreepJS 检测 tab；再调用 `browser_open_tab({ tabId: <可选既有 tabId>, url: "https://abrahamjuliot.github.io/creepjs/", active: true })`
 2. `browser_wait_for_text({ text: "trust score", timeoutMs: 30000 })` （页面计算较慢，给足 30s）
 3. 额外 `browser_wait_for_text({ text: "%", timeoutMs: 10000 })`
 4. `browser_debug_dom({})` → 拿 `snapshot.text`
@@ -411,12 +413,12 @@ Agent 跑完后产出一份 markdown 报告，结构如下：
 | 2.5 deprecated 目录 | PASS / FAIL | |
 | 2.6 actions/rateLimit 清理 | PASS / FAIL | |
 | 2.7 运行时依赖为空 | PASS / FAIL | |
-| 2.8 MCP 工具数=15 | PASS / FAIL | <实际数量> |
+| 2.8 MCP 工具数=16 | PASS / FAIL | <实际数量> |
 | 2.9 union ↔ 注册表一致 | PASS / FAIL | <差异> |
 
 ## L2 结果
 | 步骤 | 结果 | 备注 |
-| 3.1 工具 smoke 15/15 | PASS / FAIL | <失败工具列表> |
+| 3.1 工具 smoke 16/16 | PASS / FAIL | <失败工具列表> |
 | 3.2 snapshot 协议 | PASS / FAIL | |
 | 3.3 clickables 有序 | PASS / FAIL | |
 | 3.4 ref ↔ query 对齐 | PASS / FAIL | |
@@ -454,7 +456,7 @@ Agent 跑完后产出一份 markdown 报告，结构如下：
 
 | 失败项 | 最可能的根因 | 排查第一步 |
 |---|---|---|
-| 2.3 `permissions` 超集 | 有人偷偷加回 `downloads`/`storage`/`tabGroups` | `git log manifest.json` |
+| 2.3 `permissions` 超集 | 有人偷偷加回 `storage`/`tabGroups` 或把 `downloads` 用成下载动作 | `git log manifest.json` |
 | 2.4 命中 `world: 'MAIN'` | 新功能绕过隐身规则 | 看 PR diff |
 | 2.4 命中 `dispatchEvent(new MouseEvent` | 有人加回交互工具 | 检查 `src/extension/content/` 新文件 |
 | 3.1 某工具 smoke 失败 | native host / socket 未起来 | `ls $TMPDIR/browser-mcp.sock` + `chrome://extensions` 重新加载 |
@@ -466,18 +468,14 @@ Agent 跑完后产出一份 markdown 报告，结构如下：
 
 ## 7. 可选 · 回归烟雾脚本
 
-为了让 Agent 以后一键跑 L1 + L2 的纯脚本化部分，可在 `scripts/` 下新增 `acceptance-smoke.mjs`（**本文档不要求现在就写**，仅作为后续工作项建议）：
+当前已提供 `scripts/acceptance-smoke.mjs`：
 
-```js
-// scripts/acceptance-smoke.mjs (建议形态)
-// 1. 跑 npm run typecheck && npm run build
-// 2. 读 dist/manifest.json 做 2.3 字段断言
-// 3. 执行 2.4 黑名单 ripgrep
-// 4. 连 socket 调 tools/list 断言 2.8
-// 5. 输出 acceptance-report.md（见 §5）
+```bash
+npm run acceptance:smoke
+npm run acceptance:smoke -- --l1-only
 ```
 
-> 留坑不堵：L2 的检测站部分仍需 MCP Client 驱动，scripts 不要强行复制这部分逻辑，直接由 Agent 从 MCP 侧驱动即可。
+默认执行 L1 静态检查 + 本地 L2 fixture（complex-layout / Boss-like mock / detectable-surface）。L2 fixture 优先复用已有测试标签页；需要导航时传 `browser_open_tab({ tabId, url })`，不要每次回归都大量打开新 tab。在外层沙箱无法监听 `127.0.0.1` 时，可用 `--l1-only` 只跑 typecheck、build、manifest、工具清单、协议一致性和黑名单检查。
 
 ---
 
@@ -487,3 +485,4 @@ Agent 跑完后产出一份 markdown 报告，结构如下：
 |---|---|---|
 | 2026-04-23 | Cursor Agent | 初稿，对齐 `2026-04-23-chrome-mcp-readonly-refactor_cn.md` 第 7 节验证清单 |
 | 2026-04-23 | Cursor Agent | 归入 `docs/specs/`；配套计划链接改为 [`../completed/2026-04-23-chrome-mcp-readonly-refactor_cn.md`](../completed/2026-04-23-chrome-mcp-readonly-refactor_cn.md)（已完成） |
+| 2026-04-25 | Codex | 工具数修正为 16；补充 `acceptance:smoke`、JS 可感知性检测与 screenshot inactive-tab 安全边界 |

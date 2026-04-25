@@ -1,4 +1,4 @@
-import type { ClickableElement, ClickablePoint, ElementPoint, ElementRect, PageSnapshot } from '../../types'
+import type { ClickableElement, ClickablePoint, ElementPoint, ElementRect, InaccessibleFrameRegion, PageSnapshot } from '../../types'
 import type { SnapshotRequest } from '../shared/protocol'
 import { registerElementRef, resetRefState } from './state'
 
@@ -42,9 +42,17 @@ interface WalkEntry extends FrameContext {
   view: Window
 }
 
+interface FrameEntry extends FrameContext {
+  element: HTMLIFrameElement
+  view: Window
+  framePath: string
+}
+
 interface ClickableCandidate extends Omit<ClickableElement, 'ref'> {
   element: HTMLElement
 }
+
+type InaccessibleFrameCandidate = InaccessibleFrameRegion
 
 const HIT_TEST_MAX_GRID = 6
 const HIT_TEST_MIN_CELL_SIZE = 40
@@ -84,7 +92,7 @@ function fnv1a64(input: string): string {
 }
 
 function computeElementSignature(el: Element, host: string): string {
-  return fnv1a64(`${host}|${deriveRole(el) ?? ''}|${getElementLabel(el).slice(0, 40)}|${computeCssPath(el)}`)
+  return fnv1a64(`${host}|${deriveRole(el) ?? ''}|${getElementText(el).slice(0, 40)}|${computeCssPath(el)}`)
 }
 
 function getViewForElement(el: Element): Window {
@@ -200,17 +208,18 @@ function buildSafeRects(
 
 function buildClickPoint(
   el: HTMLElement,
+  hitCells: ElementRect[],
   safeRects: ElementRect[] | undefined,
   viewport: ElementRect,
   documentRect: ElementRect,
 ): ClickPoint | undefined {
-  if (!safeRects?.length) return undefined
-
   const documentTopOffset = documentRect.top - viewport.top
   const documentLeftOffset = documentRect.left - viewport.left
+  const zones = safeRects ?? []
+  if (!zones.length && !hitCells.length) return undefined
 
   for (let attempt = 0; attempt < 24; attempt += 1) {
-    const selected = safeRects[Math.floor(Math.random() * safeRects.length)] ?? safeRects[0]
+    const selected = zones[Math.floor(Math.random() * zones.length)] ?? zones[0]
     if (!selected) break
 
     const viewportX = randomBetween(selected.left, selected.left + selected.width)
@@ -224,14 +233,19 @@ function buildClickPoint(
     }
   }
 
-  const fallback = safeRects[0]
-  if (!fallback) return undefined
-  const viewportX = fallback.left + fallback.width / 2
-  const viewportY = fallback.top + fallback.height / 2
-  return {
-    viewport: toPoint(viewportX, viewportY),
-    document: toPoint(viewportX + documentLeftOffset, viewportY + documentTopOffset),
+  for (const cell of hitCells) {
+    const viewportX = cell.left + cell.width / 2
+    const viewportY = cell.top + cell.height / 2
+    const candidate = deepElementFromPoint(window, viewportX, viewportY)
+    if (candidate && isSameHitTarget(el, candidate)) {
+      return {
+        viewport: toPoint(viewportX, viewportY),
+        document: toPoint(viewportX + documentLeftOffset, viewportY + documentTopOffset),
+      }
+    }
   }
+
+  return undefined
 }
 
 function computeHitTestMetadata(
@@ -268,7 +282,7 @@ function computeHitTestMetadata(
   const safeRects = buildSafeRects(hitCells, hitCount)
   return {
     hitTestState: hitCount === 0 ? 'covered' : (hitCount === sampleCount ? 'top' : 'partial'),
-    clickPoint: buildClickPoint(el, safeRects, viewport, documentRect),
+    clickPoint: buildClickPoint(el, hitCells, safeRects, viewport, documentRect),
   }
 }
 
@@ -276,23 +290,98 @@ function toRect(top: number, left: number, width: number, height: number): Eleme
   return { top, left, width, height }
 }
 
+function parseBooleanAttribute(value: string | null): boolean | undefined {
+  if (value === 'true') return true
+  if (value === 'false') return false
+  return undefined
+}
+
+function isButtonLikeInput(input: HTMLInputElement): boolean {
+  return ['button', 'submit', 'reset'].includes(input.type)
+}
+
+function isValueBearingInput(input: HTMLInputElement): boolean {
+  return !['button', 'submit', 'reset', 'checkbox', 'radio', 'file', 'password', 'hidden', 'image'].includes(input.type)
+}
+
 function normalizeWhitespace(value: string): string {
   return value.replace(/\s+/g, ' ').trim()
 }
 
-function getElementLabel(el: Element): string {
+function getElementText(el: Element): string {
   const input = el as HTMLInputElement
-  const textarea = el as HTMLTextAreaElement
   const parts = [
     el.textContent ?? '',
-    input.value ?? '',
-    input.placeholder ?? '',
-    textarea.placeholder ?? '',
     el.getAttribute('aria-label') ?? '',
     el.getAttribute('title') ?? '',
   ]
 
+  if (el.tagName.toLowerCase() === 'input' && isButtonLikeInput(input)) {
+    parts.unshift(input.value ?? '')
+  }
+
   return normalizeWhitespace(parts.filter(Boolean).join(' ')).slice(0, TEXT_SNIPPET_LIMIT)
+}
+
+function getElementValue(el: Element): string | undefined {
+  const tag = el.tagName.toLowerCase()
+  if (tag === 'textarea') {
+    return (el as HTMLTextAreaElement).value
+  }
+  if (tag === 'select') {
+    return (el as HTMLSelectElement).value
+  }
+  if (tag === 'input') {
+    const input = el as HTMLInputElement
+    if (!isValueBearingInput(input)) return undefined
+    return input.value
+  }
+  return undefined
+}
+
+function getElementPlaceholder(el: Element): string | undefined {
+  const tag = el.tagName.toLowerCase()
+  if (tag === 'input') {
+    return (el as HTMLInputElement).placeholder || undefined
+  }
+  if (tag === 'textarea') {
+    return (el as HTMLTextAreaElement).placeholder || undefined
+  }
+  return undefined
+}
+
+function getElementState(el: HTMLElement) {
+  const ariaDisabled = parseBooleanAttribute(el.getAttribute('aria-disabled'))
+  const ariaReadonly = parseBooleanAttribute(el.getAttribute('aria-readonly'))
+  const ariaChecked = parseBooleanAttribute(el.getAttribute('aria-checked'))
+  const ariaSelected = parseBooleanAttribute(el.getAttribute('aria-selected'))
+  const ariaExpanded = parseBooleanAttribute(el.getAttribute('aria-expanded'))
+  const tag = el.tagName.toLowerCase()
+
+  let readonly = ariaReadonly
+  let checked = ariaChecked
+  let selected = ariaSelected
+
+  if (tag === 'input') {
+    const input = el as HTMLInputElement
+    if (readonly === undefined && isValueBearingInput(input)) readonly = input.readOnly
+    if (checked === undefined && ['checkbox', 'radio'].includes(input.type)) checked = input.checked
+  } else if (tag === 'textarea') {
+    if (readonly === undefined) readonly = (el as HTMLTextAreaElement).readOnly
+  } else if (tag === 'option') {
+    if (selected === undefined) selected = (el as HTMLOptionElement).selected
+  }
+
+  return {
+    value: getElementValue(el),
+    placeholder: getElementPlaceholder(el),
+    disabled: ariaDisabled ?? el.matches(':disabled'),
+    readonly,
+    checked,
+    selected,
+    expanded: ariaExpanded,
+    focused: el.matches(':focus'),
+  }
 }
 
 export function deriveRole(el: Element): string | undefined {
@@ -317,7 +406,9 @@ export function deriveRole(el: Element): string | undefined {
 
 export function normalizedElementText(el: Element): string {
   return [
-    getElementLabel(el),
+    getElementText(el),
+    getElementValue(el) ?? '',
+    getElementPlaceholder(el) ?? '',
     (el as HTMLAnchorElement).href ?? '',
     el.getAttribute('name') ?? '',
     deriveRole(el) ?? '',
@@ -385,7 +476,59 @@ function inViewport(rect: ElementRect): boolean {
     rect.left + rect.width > 0
 }
 
-function walkDocument(view: Window, baseContext: FrameContext, visitor: (entry: WalkEntry) => void) {
+function resolveFrameUrl(frame: HTMLIFrameElement, view: Window): URL | undefined {
+  const src = frame.getAttribute('src')
+  if (!src || src === 'about:blank') return undefined
+  try {
+    return new URL(src, view.location.href)
+  } catch {
+    return undefined
+  }
+}
+
+function isCrossOriginFrame(frame: HTMLIFrameElement, view: Window): boolean {
+  const url = resolveFrameUrl(frame, view)
+  return !!url && url.origin !== window.location.origin
+}
+
+function buildInaccessibleFrame(
+  frame: HTMLIFrameElement,
+  view: Window,
+  context: FrameContext,
+  framePath: string,
+): InaccessibleFrameCandidate {
+  const rect = frame.getBoundingClientRect()
+  const viewport = toRect(
+    context.viewportOffsetTop + rect.top,
+    context.viewportOffsetLeft + rect.left,
+    rect.width,
+    rect.height,
+  )
+  const documentRect = toRect(
+    context.documentOffsetTop + rect.top + view.scrollY,
+    context.documentOffsetLeft + rect.left + view.scrollX,
+    rect.width,
+    rect.height,
+  )
+  const frameUrl = resolveFrameUrl(frame, view)
+  return {
+    framePath,
+    reason: 'cross_origin',
+    host: frameUrl?.host,
+    name: frame.getAttribute('name') || undefined,
+    title: frame.getAttribute('title') || undefined,
+    viewport,
+    document: documentRect,
+    inViewport: inViewport(viewport),
+  }
+}
+
+function walkDocument(
+  view: Window,
+  baseContext: FrameContext,
+  visitor: (entry: WalkEntry) => void,
+  onInaccessibleFrame?: (entry: FrameEntry) => void,
+) {
   let nextFrameIndex = 0
 
   const walkContainer = (container: Document | ShadowRoot, context: FrameContext) => {
@@ -407,14 +550,20 @@ function walkDocument(view: Window, baseContext: FrameContext, visitor: (entry: 
 
     if (!isFrameElement(element)) return
 
+    const frameIndex = nextFrameIndex++
+    const frameOffset = getFrameContentOffset(element)
+    const framePath = context.framePath ? `${context.framePath}.${frameIndex}` : String(frameIndex)
+
+    if (isCrossOriginFrame(element, view)) {
+      onInaccessibleFrame?.({ element, view, ...context, framePath })
+      return
+    }
+
     try {
       const childDocument = element.contentDocument
       const childWindow = element.contentWindow
       if (!childDocument || !childWindow) return
 
-      const frameIndex = nextFrameIndex++
-      const frameOffset = getFrameContentOffset(element)
-      const framePath = context.framePath ? `${context.framePath}.${frameIndex}` : String(frameIndex)
       walkDocument(childWindow, {
         framePath,
         shadowDepth: 0,
@@ -448,8 +597,21 @@ export function queryDeepElements(selector: string): Element[] {
   return matches
 }
 
-function collectClickableCandidates(): ClickableCandidate[] {
+function sortByViewportPosition<T extends { inViewport: boolean; viewport: ElementRect }>(items: T[]) {
+  items.sort((left, right) => {
+    if (left.inViewport !== right.inViewport) return left.inViewport ? -1 : 1
+    if (left.viewport.top !== right.viewport.top) return left.viewport.top - right.viewport.top
+    if (left.viewport.left !== right.viewport.left) return left.viewport.left - right.viewport.left
+    return 0
+  })
+}
+
+function collectSnapshotArtifacts(limit = DEFAULT_CLICKABLE_LIMIT): {
+  clickables: ClickableElement[]
+  inaccessibleFrames: InaccessibleFrameRegion[]
+} {
   const candidates: ClickableCandidate[] = []
+  const inaccessibleFrames: InaccessibleFrameCandidate[] = []
   const host = window.location.host
 
   walkDocument(window, {
@@ -480,6 +642,7 @@ function collectClickableCandidates(): ClickableCandidate[] {
       rect.height,
     )
     const { hitTestState, clickPoint } = computeHitTestMetadata(htmlElement, viewport, documentRect)
+    const state = getElementState(htmlElement)
 
     candidates.push({
       element: htmlElement,
@@ -488,7 +651,9 @@ function collectClickableCandidates(): ClickableCandidate[] {
       clickPoint,
       tag: htmlElement.tagName.toLowerCase(),
       role: deriveRole(htmlElement),
-      text: getElementLabel(htmlElement),
+      text: getElementText(htmlElement),
+      value: state.value,
+      placeholder: state.placeholder,
       ariaLabel: htmlElement.getAttribute('aria-label') ?? undefined,
       href: htmlElement.tagName.toLowerCase() === 'a' ? (htmlElement as HTMLAnchorElement).href : undefined,
       download: htmlElement.tagName.toLowerCase() === 'a' ? ((htmlElement as HTMLAnchorElement).download || undefined) : undefined,
@@ -496,6 +661,12 @@ function collectClickableCandidates(): ClickableCandidate[] {
       type: htmlElement.tagName.toLowerCase() === 'input' ? (htmlElement as HTMLInputElement).type : undefined,
       accept: htmlElement.tagName.toLowerCase() === 'input' ? ((htmlElement as HTMLInputElement).accept || undefined) : undefined,
       multiple: htmlElement.tagName.toLowerCase() === 'input' ? (htmlElement as HTMLInputElement).multiple : undefined,
+      disabled: state.disabled,
+      readonly: state.readonly,
+      checked: state.checked,
+      selected: state.selected,
+      expanded: state.expanded,
+      focused: state.focused,
       viewport,
       document: documentRect,
       inViewport: inViewport(viewport),
@@ -503,6 +674,14 @@ function collectClickableCandidates(): ClickableCandidate[] {
       shadowDepth: shadowDepth > 0 ? shadowDepth : undefined,
       detectedBy,
     })
+  }, ({ element, view, framePath, viewportOffsetTop, viewportOffsetLeft, documentOffsetTop, documentOffsetLeft }) => {
+    inaccessibleFrames.push(buildInaccessibleFrame(element, view, {
+      viewportOffsetTop,
+      viewportOffsetLeft,
+      documentOffsetTop,
+      documentOffsetLeft,
+      shadowDepth: 0,
+    }, framePath))
   })
 
   candidates.sort((left, right) => {
@@ -516,23 +695,22 @@ function collectClickableCandidates(): ClickableCandidate[] {
     return left.tag.localeCompare(right.tag)
   })
 
-  return candidates
-}
-
-export function collectClickableElements(limit = DEFAULT_CLICKABLE_LIMIT): ClickableElement[] {
-  const candidates = collectClickableCandidates().slice(0, limit)
+  sortByViewportPosition(inaccessibleFrames)
   resetRefState()
-
-  return candidates.map(({ element, ...candidate }) => ({
-    ref: registerElementRef(element),
-    ...candidate,
-  }))
+  return {
+    clickables: candidates.slice(0, limit).map(({ element, ...candidate }) => ({
+      ref: registerElementRef(element),
+      ...candidate,
+    })),
+    inaccessibleFrames,
+  }
 }
 
 export function buildSnapshot(req: SnapshotRequest = {}): PageSnapshot {
   const textLength = req.maxTextLength ?? DEFAULT_TEXT_LENGTH
   const htmlLength = req.maxHtmlLength ?? DEFAULT_HTML_LENGTH
   const clickableLimit = req.clickableLimit ?? DEFAULT_CLICKABLE_LIMIT
+  const { clickables, inaccessibleFrames } = collectSnapshotArtifacts(clickableLimit)
 
   return {
     url: location.href,
@@ -540,6 +718,8 @@ export function buildSnapshot(req: SnapshotRequest = {}): PageSnapshot {
     viewport: {
       innerWidth: window.innerWidth,
       innerHeight: window.innerHeight,
+      outerWidth: window.outerWidth,
+      outerHeight: window.outerHeight,
       scrollX: window.scrollX,
       scrollY: window.scrollY,
       devicePixelRatio: window.devicePixelRatio,
@@ -557,7 +737,8 @@ export function buildSnapshot(req: SnapshotRequest = {}): PageSnapshot {
       scrollWidth: document.documentElement.scrollWidth,
       scrollHeight: document.documentElement.scrollHeight,
     },
-    clickables: collectClickableElements(clickableLimit),
+    clickables,
+    inaccessibleFrames,
     text: req.includeText ? (document.body?.innerText ?? '').slice(0, textLength) : undefined,
     html: req.includeHtml ? document.documentElement.outerHTML.slice(0, htmlLength) : undefined,
   }

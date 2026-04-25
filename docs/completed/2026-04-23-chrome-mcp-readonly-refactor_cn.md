@@ -10,6 +10,7 @@
 > - [`./2026-04-23-browser-mcp-signature-impl_cn.md`](./2026-04-23-browser-mcp-signature-impl_cn.md)
 > - [`./2026-04-24-browser-mcp-clickpoint-recruitment-acceptance_cn.md`](./2026-04-24-browser-mcp-clickpoint-recruitment-acceptance_cn.md)
 > - [`../specs/2026-04-24-browser-mcp-complex-layout-acceptance_cn.md`](../specs/2026-04-24-browser-mcp-complex-layout-acceptance_cn.md)
+> - 2026-04-25 增量：新增 `browser_locate_download`，只读查询 Chrome 下载记录中的本地 artifact 路径、下载状态和 `exists` 状态；这不是恢复 `browser_download_file` 或页面内下载动作。
 
 **遵守原则**: 查询类保留；"可被检测的通通删除"；用户声明的 tab 切换/打开/聚焦保留。
 
@@ -128,6 +129,7 @@ git branch feature/20260423-chrome-mcp   # 仅创建备份分支（指向当前 
 
 - `content_scripts[0].all_frames` 保持 `false`（只在顶层 frame 注入；同源 iframe 通过顶层 DOM 递归抓坐标）
 - `description` 改为 "Read-only Chrome browser MCP runtime"
+- 2026-04-25 起重新加入 `downloads` 权限，仅允许 background 只读 `chrome.downloads.search` 用于 artifact 路径定位和状态读取；不得用于触发下载、打开 `chrome://downloads` 或页面 JS 可感知通路。
 
 ---
 

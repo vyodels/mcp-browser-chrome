@@ -6,6 +6,7 @@ export const COMPLEX_LAYOUT = {
   toolbar: { top: 24, left: 32, width: 176, height: 44 },
   articleButton: { top: 980, left: 120, width: 176, height: 44 },
   libraryFrame: { top: 1160, left: 80, width: 520, height: 220, border: 4 },
+  externalFrame: { top: 1408, left: 120, width: 360, height: 140, border: 3 },
   libraryFrameButton: { top: 36, left: 28, width: 172, height: 40 },
   nestedFrame: { top: 120, left: 180, width: 280, height: 120 },
   nestedFrameLink: { top: 20, left: 30, width: 152, height: 32 },
@@ -26,7 +27,7 @@ export const COMPLEX_LAYOUT = {
   modalAction: { top: 332, left: 304, width: 112, height: 44 },
 }
 
-function parentHtml(origin) {
+function parentHtml(origin, crossOriginOrigin) {
   return `<!doctype html>
 <html lang="zh-CN">
   <head>
@@ -142,15 +143,26 @@ function parentHtml(origin) {
         color: #fff;
         cursor: pointer;
       }
-      .library-frame {
+      .library-frame,
+      .external-frame {
         position: absolute;
+        background: #fff;
+      }
+      .library-frame {
         top: ${COMPLEX_LAYOUT.libraryFrame.top}px;
         left: ${COMPLEX_LAYOUT.libraryFrame.left}px;
         width: ${COMPLEX_LAYOUT.libraryFrame.width}px;
         height: ${COMPLEX_LAYOUT.libraryFrame.height}px;
         border: ${COMPLEX_LAYOUT.libraryFrame.border}px solid #0f172a;
         border-radius: 20px;
-        background: #fff;
+      }
+      .external-frame {
+        top: ${COMPLEX_LAYOUT.externalFrame.top}px;
+        left: ${COMPLEX_LAYOUT.externalFrame.left}px;
+        width: ${COMPLEX_LAYOUT.externalFrame.width}px;
+        height: ${COMPLEX_LAYOUT.externalFrame.height}px;
+        border: ${COMPLEX_LAYOUT.externalFrame.border}px solid #7c3aed;
+        border-radius: 18px;
       }
       .shadow-host {
         position: absolute;
@@ -309,17 +321,18 @@ function parentHtml(origin) {
     <button class="article-button">立即沟通</button>
     <section class="mixed-controls">
       <a href="${origin}/jobs/frontend-platform">查看职位详情</a>
-      <input type="text" value="前端工程师" />
-      <textarea placeholder="给候选人留言"></textarea>
+      <input type="text" name="jobQuery" value="前端工程师" readonly />
+      <textarea name="candidateNote" placeholder="给候选人留言"></textarea>
       <select>
         <option>初筛中</option>
         <option>约面中</option>
       </select>
-      <div class="fake-button" role="button">更多筛选</div>
-      <div tabindex="0">候选人标签</div>
-      <div onclick="void 0">安排面试</div>
+      <div class="fake-button" role="button" aria-expanded="true">更多筛选</div>
+      <div tabindex="0" role="option" aria-selected="true">候选人标签</div>
+      <div tabindex="0" role="checkbox" aria-checked="true">安排面试</div>
     </section>
     <iframe class="library-frame" src="${origin}/fixture/library"></iframe>
+    <iframe class="external-frame" title="外部人才库" name="external-talent" src="${crossOriginOrigin}/fixture/external"></iframe>
     <div class="shadow-host" id="shadow-host"></div>
     <div class="status" id="fixture-status">fixture booting</div>
     <div class="modal-layer">
@@ -327,14 +340,14 @@ function parentHtml(origin) {
       <div class="modal">
         <button class="modal-close">关闭沟通窗</button>
         <iframe class="modal-frame" src="${origin}/fixture/modal"></iframe>
-        <textarea class="modal-composer" placeholder="输入消息，和候选人打个招呼"></textarea>
+        <textarea class="modal-composer" name="chatComposer" placeholder="输入消息，和候选人打个招呼"></textarea>
         <input class="modal-upload" type="file" aria-label="上传附件简历" accept="application/pdf,.pdf" />
         <a class="modal-offline-link" href="${origin}/fixture/offline-resume-view">查看离线简历</a>
         <a class="modal-download" href="${origin}/fixture/download/candidate-resume.pdf" download="candidate-resume.pdf">下载离线简历</a>
         <div class="modal-triangle" role="button" aria-label="更多沟通操作"></div>
         <button class="modal-partial-action">交换联系方式</button>
         <div class="modal-partial-cover" aria-hidden="true"></div>
-        <button class="modal-action">发送消息</button>
+        <button class="modal-action" disabled>发送消息</button>
       </div>
     </div>
     <script>
@@ -373,6 +386,7 @@ function parentHtml(origin) {
         window.scrollTo(0, ${FIXTURE_SCROLL_Y})
         requestAnimationFrame(() => {
           requestAnimationFrame(() => {
+            document.querySelector('.modal-composer')?.focus()
             document.getElementById('fixture-status').textContent = 'fixture-ready'
           })
         })
@@ -481,14 +495,37 @@ function modalFrameHtml() {
 </html>`
 }
 
+function externalFrameHtml() {
+  return `<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <title>外部人才库</title>
+    <style>
+      body { margin: 0; font-family: Menlo, Monaco, monospace; background: #faf5ff; }
+      .banner { padding: 24px; color: #581c87; }
+    </style>
+  </head>
+  <body>
+    <div class="banner">external-talent-frame</div>
+  </body>
+</html>`
+}
+
 function downloadBody(name) {
   return `%PDF-1.4\n% fixture ${name}\n1 0 obj\n<< /Type /Catalog >>\nendobj\ntrailer\n<< /Root 1 0 R >>\n%%EOF\n`
 }
 
 export async function createComplexLayoutServer() {
   const sockets = new Set()
+  const externalSockets = new Set()
+  const externalServer = http.createServer((req, res) => {
+    res.setHeader('content-type', 'text/html; charset=utf-8')
+    res.end(externalFrameHtml())
+  })
   const server = http.createServer((req, res) => {
     const origin = `http://127.0.0.1:${server.address().port}`
+    const crossOriginOrigin = `http://127.0.0.1:${externalServer.address().port}`
 
     if (req.url === '/fixture/download/candidate-resume.pdf' || req.url === '/fixture/download/candidate-portfolio.pdf') {
       const filename = req.url.endsWith('candidate-resume.pdf') ? 'candidate-resume.pdf' : 'candidate-portfolio.pdf'
@@ -520,20 +557,32 @@ export async function createComplexLayoutServer() {
       return
     }
 
-    res.end(parentHtml(origin))
+    res.end(parentHtml(origin, crossOriginOrigin))
   })
 
   server.on('connection', (socket) => {
     sockets.add(socket)
     socket.on('close', () => sockets.delete(socket))
   })
+  externalServer.on('connection', (socket) => {
+    externalSockets.add(socket)
+    socket.on('close', () => externalSockets.delete(socket))
+  })
 
+  await new Promise((resolve) => externalServer.listen(0, '127.0.0.1', resolve))
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
   const port = server.address().port
   return {
     close: () => new Promise((resolve, reject) => {
       for (const socket of sockets) socket.destroy()
-      server.close((error) => error ? reject(error) : resolve())
+      for (const socket of externalSockets) socket.destroy()
+      server.close((error) => {
+        if (error) {
+          reject(error)
+          return
+        }
+        externalServer.close((externalError) => externalError ? reject(externalError) : resolve())
+      })
     }),
     origin: `http://127.0.0.1:${port}`,
     url: `http://127.0.0.1:${port}/fixture/parent`,

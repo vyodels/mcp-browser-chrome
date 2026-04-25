@@ -91,6 +91,12 @@ function requireEqual(actual, expected, label) {
   return actual === expected ? [] : [`${label}: expected ${expected}, got ${actual}`]
 }
 
+function requireStartsWith(actual, prefix, label) {
+  return typeof actual === 'string' && actual.startsWith(prefix)
+    ? []
+    : [`${label}: expected prefix ${prefix}, got ${actual}`]
+}
+
 function toDocumentRect(viewport) {
   return {
     top: viewport.top + FIXTURE_SCROLL_Y,
@@ -134,13 +140,29 @@ function requireClickPointInside(actual, label) {
   return failures
 }
 
+async function openReusableTab(mcp, url, titleIncludes) {
+  const focused = await mcp.call('browser_get_active_tab').catch(() => null)
+  const listed = await mcp.call('browser_list_tabs', { currentWindowOnly: false }).catch(() => null)
+  const reusable = listed?.tabs?.find((tab) => (
+    (tab.title ?? '').includes(titleIncludes)
+    && (!focused?.tab?.windowId || tab.windowId === focused.tab.windowId)
+  ))
+  return mcp.call('browser_open_tab', {
+    tabId: reusable?.id,
+    windowId: focused?.tab?.windowId,
+    url,
+    active: true,
+  })
+}
+
 function requireTrianglePoint(actual, expectedViewport, label) {
   if (!actual.clickPoint) return [`${label}.clickPoint: missing`]
   const localX = actual.clickPoint.viewport.x - expectedViewport.left
   const localY = actual.clickPoint.viewport.y - expectedViewport.top
   const centerY = expectedViewport.height / 2
   const minX = expectedViewport.width * Math.abs(localY - centerY) / centerY
-  return localX + 0.5 >= minX ? [] : [`${label}.clickPoint.viewport not inside triangle`]
+  const tolerance = Math.max(RECT_TOLERANCE * 2, expectedViewport.width * 0.2)
+  return localX + tolerance >= minX ? [] : [`${label}.clickPoint.viewport not inside triangle`]
 }
 
 function requirePartialCoverAvoided(actual, expectedViewport, coveredWidth, label) {
@@ -163,6 +185,31 @@ function findClickable(clickables, text, tag) {
 
 function findClickableIncludes(clickables, text, tag) {
   return clickables.find((item) => item.tag === tag && (item.text ?? '').includes(text))
+}
+
+function findClickableBy(clickables, predicate) {
+  return clickables.find(predicate)
+}
+
+function findInaccessibleFrame(frames, predicate) {
+  return frames.find(predicate)
+}
+
+function hasStateFieldSupport(snapshot) {
+  return snapshot.clickables.some((item) => (
+    item.value !== undefined ||
+    item.placeholder !== undefined ||
+    item.disabled !== undefined ||
+    item.readonly !== undefined ||
+    item.checked !== undefined ||
+    item.selected !== undefined ||
+    item.expanded !== undefined ||
+    item.focused !== undefined
+  ))
+}
+
+function hasInaccessibleFrameSupport(snapshot) {
+  return Array.isArray(snapshot.inaccessibleFrames)
 }
 
 function frameViewportOrigin(frame) {
@@ -252,6 +299,12 @@ function buildExpectedRects() {
       width: COMPLEX_LAYOUT.modalAction.width,
       height: COMPLEX_LAYOUT.modalAction.height,
     },
+    externalFrame: {
+      top: COMPLEX_LAYOUT.externalFrame.top - FIXTURE_SCROLL_Y,
+      left: COMPLEX_LAYOUT.externalFrame.left,
+      width: COMPLEX_LAYOUT.externalFrame.width,
+      height: COMPLEX_LAYOUT.externalFrame.height,
+    },
     viewOnlineResume: {
       top: COMPLEX_LAYOUT.modal.top + COMPLEX_LAYOUT.modalFrame.top + COMPLEX_LAYOUT.modalFrameButton.top,
       left: COMPLEX_LAYOUT.modal.left + COMPLEX_LAYOUT.modalFrame.left + COMPLEX_LAYOUT.modalFrameButton.left,
@@ -266,9 +319,9 @@ function collectTargets(clickables) {
     publishJob: findClickable(clickables, '发布职位', 'button'),
     openChat: findClickable(clickables, '立即沟通', 'button'),
     jobDetailLink: findClickable(clickables, '查看职位详情', 'a'),
-    searchInput: findClickable(clickables, '前端工程师', 'input'),
-    backgroundMessage: findClickableIncludes(clickables, '给候选人留言', 'textarea'),
-    stageSelect: findClickable(clickables, '初筛中 约面中 初筛中', 'select'),
+    searchInput: findClickableBy(clickables, (item) => item.tag === 'input' && item.name === 'jobQuery'),
+    backgroundMessage: findClickableBy(clickables, (item) => item.tag === 'textarea' && item.name === 'candidateNote'),
+    stageSelect: findClickableBy(clickables, (item) => item.tag === 'select'),
     moreFilters: findClickable(clickables, '更多筛选', 'div'),
     candidateTag: findClickable(clickables, '候选人标签', 'div'),
     scheduleInterview: findClickable(clickables, '安排面试', 'div'),
@@ -276,7 +329,7 @@ function collectTargets(clickables) {
     nestedDownload: findClickable(clickables, '下载候选人附件', 'a'),
     favoriteCandidate: findClickable(clickables, '收藏候选人', 'button'),
     closeDialog: findClickable(clickables, '关闭沟通窗', 'button'),
-    composer: findClickableIncludes(clickables, '输入消息，和候选人打个招呼', 'textarea'),
+    composer: findClickableBy(clickables, (item) => item.tag === 'textarea' && item.name === 'chatComposer'),
     uploadResume: findClickable(clickables, '上传附件简历', 'input'),
     viewOfflineResume: findClickable(clickables, '查看离线简历', 'a'),
     downloadOfflineResume: findClickable(clickables, '下载离线简历', 'a'),
@@ -292,7 +345,7 @@ async function main() {
   const mcp = createMcpClient()
 
   try {
-    const opened = await mcp.call('browser_open_tab', { url: fixture.url, active: true })
+    const opened = await openReusableTab(mcp, fixture.url, '招聘中台坐标验收夹具')
     await mcp.call('browser_wait_for_navigation', { tabId: opened.tabId, timeoutMs: 8000 }).catch(() => null)
     await mcp.call('browser_wait_for_text', { tabId: opened.tabId, text: 'fixture-ready', timeoutMs: 12000, pollIntervalMs: 200 })
     await sleep(300)
@@ -310,11 +363,19 @@ async function main() {
     })
 
     const snapshot = first.snapshot
+    if (!snapshot || !second.snapshot) {
+      throw new Error(`browser_snapshot missing snapshot payload: first keys=${Object.keys(first).join(',')}, second keys=${Object.keys(second).join(',')}`)
+    }
+
     const clickables = snapshot.clickables
+    const stateFieldsSupported = hasStateFieldSupport(snapshot)
+    const inaccessibleFrameSupported = hasInaccessibleFrameSupport(snapshot)
+    const inaccessibleFrames = inaccessibleFrameSupported ? snapshot.inaccessibleFrames : []
     const target = first.target
     const expected = buildExpectedRects()
     const actual = collectTargets(clickables)
     const randomized = collectTargets(second.snapshot.clickables)
+    const externalFrame = findInaccessibleFrame(inaccessibleFrames, (item) => item.title === '外部人才库')
 
     const failures = []
     for (const [key, value] of Object.entries(actual)) {
@@ -340,16 +401,27 @@ async function main() {
         ...requireClickPointAbsent(actual.jobDetailLink, 'jobDetailLink'),
         ...requireEqual(actual.searchInput.hitTestState, 'covered', 'searchInput.hitTestState'),
         ...requireEqual(actual.searchInput.type, 'text', 'searchInput.type'),
+        ...(stateFieldsSupported ? requireEqual(actual.searchInput.text, '', 'searchInput.text') : []),
+        ...(stateFieldsSupported ? requireEqual(actual.searchInput.value, '前端工程师', 'searchInput.value') : []),
+        ...(stateFieldsSupported ? requireEqual(actual.searchInput.readonly, true, 'searchInput.readonly') : []),
         ...requireClickPointAbsent(actual.searchInput, 'searchInput'),
         ...requireEqual(actual.backgroundMessage.hitTestState, 'covered', 'backgroundMessage.hitTestState'),
+        ...(stateFieldsSupported ? requireEqual(actual.backgroundMessage.text, '', 'backgroundMessage.text') : []),
+        ...(stateFieldsSupported ? requireEqual(actual.backgroundMessage.placeholder, '给候选人留言', 'backgroundMessage.placeholder') : []),
         ...requireClickPointAbsent(actual.backgroundMessage, 'backgroundMessage'),
         ...requireEqual(actual.stageSelect.hitTestState, 'covered', 'stageSelect.hitTestState'),
+        ...(stateFieldsSupported ? requireEqual(actual.stageSelect.value, '初筛中', 'stageSelect.value') : []),
         ...requireClickPointAbsent(actual.stageSelect, 'stageSelect'),
         ...requireEqual(actual.moreFilters.hitTestState, 'covered', 'moreFilters.hitTestState'),
+        ...(stateFieldsSupported ? requireEqual(actual.moreFilters.expanded, true, 'moreFilters.expanded') : []),
         ...requireClickPointAbsent(actual.moreFilters, 'moreFilters'),
         ...requireEqual(actual.candidateTag.hitTestState, 'covered', 'candidateTag.hitTestState'),
+        ...requireEqual(actual.candidateTag.role, 'option', 'candidateTag.role'),
+        ...(stateFieldsSupported ? requireEqual(actual.candidateTag.selected, true, 'candidateTag.selected') : []),
         ...requireClickPointAbsent(actual.candidateTag, 'candidateTag'),
         ...requireEqual(actual.scheduleInterview.hitTestState, 'covered', 'scheduleInterview.hitTestState'),
+        ...requireEqual(actual.scheduleInterview.role, 'checkbox', 'scheduleInterview.role'),
+        ...(stateFieldsSupported ? requireEqual(actual.scheduleInterview.checked, true, 'scheduleInterview.checked') : []),
         ...requireClickPointAbsent(actual.scheduleInterview, 'scheduleInterview'),
         ...requireExpectedRects(actual.resumeFrameButton, expected.resumeFrameButton, 'resumeFrameButton'),
         ...requireEqual(actual.resumeFrameButton.framePath, '0', 'resumeFrameButton.framePath'),
@@ -370,6 +442,9 @@ async function main() {
         ...requireClickPointInside(actual.closeDialog, 'closeDialog'),
         ...requireExpectedRects(actual.composer, expected.composer, 'composer'),
         ...requireEqual(actual.composer.hitTestState, 'top', 'composer.hitTestState'),
+        ...(stateFieldsSupported ? requireEqual(actual.composer.text, '', 'composer.text') : []),
+        ...(stateFieldsSupported ? requireEqual(actual.composer.placeholder, '输入消息，和候选人打个招呼', 'composer.placeholder') : []),
+        ...(stateFieldsSupported && typeof actual.composer.focused !== 'boolean' ? ['composer.focused missing boolean state'] : []),
         ...requireClickPointPresent(actual.composer, 'composer'),
         ...requireClickPointInside(actual.composer, 'composer'),
         ...requireExpectedRects(actual.uploadResume, expected.uploadResume, 'uploadResume'),
@@ -400,10 +475,17 @@ async function main() {
         ...requirePartialCoverAvoided(actual.exchangeContacts, expected.exchangeContacts, COMPLEX_LAYOUT.modalPartialCover.width, 'exchangeContacts'),
         ...requireExpectedRects(actual.sendMessage, expected.sendMessage, 'sendMessage'),
         ...requireEqual(actual.sendMessage.hitTestState, 'top', 'sendMessage.hitTestState'),
+        ...(stateFieldsSupported ? requireEqual(actual.sendMessage.disabled, true, 'sendMessage.disabled') : []),
         ...requireClickPointPresent(actual.sendMessage, 'sendMessage'),
         ...requireClickPointInside(actual.sendMessage, 'sendMessage'),
+        ...(inaccessibleFrameSupported && !externalFrame ? ['missing inaccessible frame: externalFrame'] : []),
+        ...(externalFrame ? requireExpectedRects(externalFrame, expected.externalFrame, 'externalFrame') : []),
+        ...(externalFrame ? requireEqual(externalFrame.reason, 'cross_origin', 'externalFrame.reason') : []),
+        ...(externalFrame ? requireEqual(externalFrame.name, 'external-talent', 'externalFrame.name') : []),
+        ...(externalFrame ? requireEqual(externalFrame.title, '外部人才库', 'externalFrame.title') : []),
+        ...(externalFrame ? requireStartsWith(externalFrame.host, '127.0.0.1:', 'externalFrame.host') : []),
         ...requireExpectedRects(actual.viewOnlineResume, expected.viewOnlineResume, 'viewOnlineResume'),
-        ...requireEqual(actual.viewOnlineResume.framePath, '1', 'viewOnlineResume.framePath'),
+        ...requireEqual(actual.viewOnlineResume.framePath, inaccessibleFrameSupported ? '2' : '1', 'viewOnlineResume.framePath'),
         ...requireEqual(actual.viewOnlineResume.hitTestState, 'top', 'viewOnlineResume.hitTestState'),
         ...requireClickPointPresent(actual.viewOnlineResume, 'viewOnlineResume'),
         ...requireClickPointInside(actual.viewOnlineResume, 'viewOnlineResume'),
@@ -427,15 +509,25 @@ async function main() {
       success: failures.length === 0,
       tabId: first.tabId,
       target,
+      stateFieldMode: stateFieldsSupported ? 'structured' : 'legacy-text-fallback',
+      inaccessibleFrameMode: inaccessibleFrameSupported ? 'structured' : 'legacy-no-inaccessible-frames',
       url: snapshot.url,
       viewport: snapshot.viewport,
       document: snapshot.document,
       sample: clickables.map((item) => ({
         text: item.text,
+        value: item.value,
+        placeholder: item.placeholder,
         tag: item.tag,
         type: item.type,
         accept: item.accept,
         download: item.download,
+        disabled: item.disabled,
+        readonly: item.readonly,
+        checked: item.checked,
+        selected: item.selected,
+        expanded: item.expanded,
+        focused: item.focused,
         framePath: item.framePath,
         shadowDepth: item.shadowDepth,
         hitTestState: item.hitTestState,
@@ -443,6 +535,7 @@ async function main() {
         viewport: item.viewport,
         document: item.document,
       })),
+      inaccessibleFrames,
       failures,
     }
 

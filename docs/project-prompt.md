@@ -67,7 +67,7 @@ Native Messaging 的优势：
 2. **默认只读优先**：先读页面，再做定位与分层；运行时本身不在页面内合成点击、输入、滚动等事件
 3. **默认只暴露必要快照**：页面文本限制长度，clickables 限制数量，HTML 仅在 debug 模式下返回
 4. **快照需要足够几何信息**：
-   - 页面级：`innerWidth/Height`、`scrollX/Y`、`devicePixelRatio`、`screenX/Y`、`visualViewport`
+   - 页面级：`innerWidth/Height`、`outerWidth/Height`、`scrollX/Y`、`devicePixelRatio`、`screenX/Y`、`visualViewport` 等浏览器可观察窗口/页面指标；它们不是权威 HID 屏幕坐标映射合同
    - 元素级：`viewport` / `document` / `framePath` / `shadowDepth`
    - 命中级：`hitTestState` + 位于真实生效区域内的随机 `clickPoint`
 5. **显式等待优于盲等**：优先 `wait_for_element` / `wait_for_text` / `wait_for_navigation`
@@ -97,6 +97,7 @@ Native Messaging 的优势：
 - 截图
 - Cookies 读取
 - 只读文件相关语义识别（上传控件 / 下载链接）
+- 只读下载记录 / artifact 路径定位（`browser_locate_download`，background `chrome.downloads.search`，可用 `sourceUrl/finalUrl/referrer + startedAfter` 关联 HID 点击来源与下载记录，可返回下载中 / 中断 / 已完成状态，不走页面 JS）
 
 #### 已从扩展中移出的能力（放到 Codex / MCP client 侧）
 

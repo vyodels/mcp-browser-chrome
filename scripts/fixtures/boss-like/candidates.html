@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>候选人推荐 · Recruiting Workspace</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark">R</div>
+          <div class="brand-copy">
+            <strong>Recruiting Workspace</strong>
+            <span>candidate discovery surface</span>
+          </div>
+        </div>
+        <nav class="nav-group">
+          <a class="nav-link" href="./jobs.html">活跃职位</a>
+          <a class="nav-link active" href="./candidates.html">候选人推荐</a>
+          <a class="nav-link" href="./candidate-detail.html">候选人详情</a>
+        </nav>
+        <div class="sidebar-card">
+          <small>目标岗位</small>
+          <strong>国际销售工程师</strong>
+          <p class="muted">推荐结果需要收敛成业务级候选人发现结果，而不是页面路径。</p>
+        </div>
+      </aside>
+      <main class="main">
+        <section class="toolbar">
+          <div>
+            <h1>候选人推荐</h1>
+            <p>观察候选人卡片、简历线索和详情入口，提炼可直接入库的候选人事实。</p>
+          </div>
+          <div class="filters">
+            <input type="text" name="candidateSearch" placeholder="搜索候选人" />
+            <select name="pipelineStage">
+              <option selected>初筛中</option>
+              <option>约面中</option>
+            </select>
+            <label class="pill">
+              <input type="checkbox" name="withAttachmentOnly" checked />
+              仅看带附件简历
+            </label>
+          </div>
+        </section>
+
+        <section class="section-card">
+          <div class="candidate-list">
+            <article class="candidate-card">
+              <header>
+                <div>
+                  <h2>李青</h2>
+                  <div class="meta">
+                    <span class="tag">5 年经验</span>
+                    <span class="tag">英语流利</span>
+                    <span class="tag">海外销售</span>
+                  </div>
+                </div>
+                <span class="tag">可继续跟进</span>
+              </header>
+              <p>在线简历：5 年海外销售与解决方案经验，最近两段经历均负责东南亚市场客户拓展与售前演示。</p>
+              <div class="facts">
+                <span class="pill">已查看 4 次</span>
+                <span class="pill">已沟通 1 次</span>
+                <span class="pill">附件简历 PDF</span>
+              </div>
+              <div class="toolbar-actions">
+                <a class="button-link" href="./candidate-detail.html?id=cand-li-001">查看候选人详情</a>
+                <a class="button-link secondary" href="./candidate-detail.html?id=cand-li-001#resume-card">查看附件线索</a>
+              </div>
+            </article>
+
+            <article class="candidate-card">
+              <header>
+                <div>
+                  <h2>陈舟</h2>
+                  <div class="meta">
+                    <span class="tag">售前咨询</span>
+                    <span class="tag">解决方案</span>
+                    <span class="tag">面向企业客户</span>
+                  </div>
+                </div>
+                <span class="tag warning">仅在线简历</span>
+              </header>
+              <p>在线简历：主导过多次大型售前演示，具备跨团队协同和需求澄清经验，暂未看到附件下载入口。</p>
+              <div class="facts">
+                <span class="pill">最近活跃 2 天前</span>
+                <span class="pill">推荐理由匹配度高</span>
+              </div>
+              <div class="toolbar-actions">
+                <a class="button-link secondary" href="./candidate-detail.html?id=cand-chen-002">查看候选人详情</a>
+              </div>
+            </article>
+          </div>
+          <p class="footer-note">Mock 页面保留在线简历、附件线索和详情入口这类通用招聘语义，不提供站点特化选择器。</p>
+        </section>
+      </main>
+    </div>
+  </body>
+</html>

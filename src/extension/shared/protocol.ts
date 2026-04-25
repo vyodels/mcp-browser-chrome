@@ -76,6 +76,7 @@ export type BrowserCommandName =
   | 'browser_wait_for_navigation'
   | 'browser_wait_for_disappear'
   | 'browser_get_cookies'
+  | 'browser_locate_download'
   | 'browser_wait_for_url'
   | 'browser_screenshot'
 

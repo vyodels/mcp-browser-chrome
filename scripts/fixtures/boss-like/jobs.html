@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>职位列表 · Recruiting Workspace</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark">R</div>
+          <div class="brand-copy">
+            <strong>Recruiting Workspace</strong>
+            <span>boss-like mock validation</span>
+          </div>
+        </div>
+        <nav class="nav-group">
+          <a class="nav-link active" href="./jobs.html">活跃职位</a>
+          <a class="nav-link" href="./candidates.html">候选人推荐</a>
+          <a class="nav-link" href="./candidate-detail.html">候选人详情</a>
+        </nav>
+        <div class="sidebar-card">
+          <small>招聘中岗位</small>
+          <strong>2 个</strong>
+          <p class="muted">最近同步 3 分钟前，筛选条件已按海外销售方向保存。</p>
+        </div>
+      </aside>
+      <main class="main">
+        <section class="toolbar">
+          <div>
+            <h1>活跃职位</h1>
+            <p>观察岗位列表、进入详情并判断哪些职位仍处于招聘中。</p>
+          </div>
+          <div class="toolbar-actions">
+            <input type="text" name="jobQuery" value="国际销售工程师" readonly />
+            <select name="jobStatus">
+              <option selected>招聘中</option>
+              <option>暂停中</option>
+            </select>
+            <a class="button-link secondary" href="./candidates.html">查看候选人</a>
+          </div>
+        </section>
+
+        <div class="layout-two">
+          <section class="section-card">
+            <div class="job-list">
+              <article class="job-row">
+                <header>
+                  <div>
+                    <h2>国际销售工程师</h2>
+                    <div class="meta">
+                      <span class="tag">北京</span>
+                      <span class="tag">20k-30k</span>
+                      <span class="tag">海外业务</span>
+                    </div>
+                  </div>
+                  <span class="tag">招聘中</span>
+                </header>
+                <p>负责海外客户拓展、售前方案协同和重点客户跟进，需可直接支持英文演示与商务推进。</p>
+                <div class="facts">
+                  <span class="pill">活跃候选人 18</span>
+                  <span class="pill">昨日新增沟通 4</span>
+                  <span class="pill">待收简历 3</span>
+                </div>
+                <div class="toolbar-actions">
+                  <a class="button-link" href="./candidates.html?job=jd-sales-001">查看候选人</a>
+                  <a class="button-link secondary" href="#detail-panel">查看职位详情</a>
+                </div>
+              </article>
+
+              <article class="job-row">
+                <header>
+                  <div>
+                    <h2>解决方案顾问</h2>
+                    <div class="meta">
+                      <span class="tag">上海</span>
+                      <span class="tag">25k-35k</span>
+                      <span class="tag">售前咨询</span>
+                    </div>
+                  </div>
+                  <span class="tag">招聘中</span>
+                </header>
+                <p>支持售前演示、方案澄清与跨团队交付协同，要求具有复杂项目沟通经验。</p>
+                <div class="facts">
+                  <span class="pill">活跃候选人 11</span>
+                  <span class="pill">推荐反馈 5</span>
+                  <span class="pill">详情已同步</span>
+                </div>
+                <div class="toolbar-actions">
+                  <a class="button-link" href="./candidates.html?job=jd-sales-002">查看候选人</a>
+                  <a class="button-link secondary" href="#detail-panel">查看职位详情</a>
+                </div>
+              </article>
+            </div>
+          </section>
+
+          <aside class="detail-card" id="detail-panel">
+            <div class="detail-header">
+              <div>
+                <h1>国际销售工程师</h1>
+                <p class="muted">详情面板只提供通用招聘语义，不向 runtime 暴露站点私有脚本。</p>
+              </div>
+              <span class="tag">开放中</span>
+            </div>
+            <div class="key-metrics">
+              <div class="metric">
+                <small class="muted">优先级</small>
+                <strong>P1</strong>
+              </div>
+              <div class="metric">
+                <small class="muted">在招天数</small>
+                <strong>12</strong>
+              </div>
+              <div class="metric">
+                <small class="muted">推荐转简历</small>
+                <strong>31%</strong>
+              </div>
+            </div>
+            <div class="resume-grid">
+              <div class="resume-card">
+                <h3>岗位摘要</h3>
+                <p>负责海外客户拓展与售前方案协同，需要英语流利、跨区域客户推进经验和结构化解决方案表达能力。</p>
+              </div>
+              <div class="resume-card">
+                <h3>活跃证据</h3>
+                <ul>
+                  <li>列表中出现“招聘中”状态标签</li>
+                  <li>详情面板存在“开放中”状态和候选人入口</li>
+                  <li>岗位仍有最近沟通与待收简历指标</li>
+                </ul>
+              </div>
+            </div>
+            <p class="footer-note">Mock 页面目标：为 JD sync 提供足够信息密度，而不是复刻真实站点 DOM。</p>
+          </aside>
+        </div>
+      </main>
+    </div>
+  </body>
+</html>

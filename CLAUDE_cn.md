@@ -8,6 +8,7 @@
 npm run dev                  # 监听模式构建（开发用）
 npm run build                # 生产构建 → dist/
 npm run typecheck            # TypeScript 类型检查（不输出文件）
+npm run acceptance:smoke     # 本地 L1/L2 验收：静态检查 + 三组本地运行时 acceptance
 npm run setup:auto           # 一键完成：构建 + 安装 native host + 注册 Codex MCP
 npm run native-host:start    # 调试模式启动 native host（持久运行，本地排障用）
 npm run native-host:stdio    # 模拟 Chrome 真实 stdio 方式拉起 native host
@@ -67,15 +68,21 @@ Codex / MCP Client
 
 ## MCP 工具列表（`browser_*`）
 
-只支持以下 16 个工具：
+只支持以下 17 个工具：
 
-`browser_list_tabs`、`browser_get_active_tab`、`browser_reload_extension`、`browser_select_tab`、`browser_open_tab`、`browser_snapshot`、`browser_query_elements`、`browser_get_element`、`browser_debug_dom`、`browser_screenshot`、`browser_get_cookies`、`browser_wait_for_element`、`browser_wait_for_text`、`browser_wait_for_disappear`、`browser_wait_for_navigation`、`browser_wait_for_url`
+`browser_list_tabs`、`browser_get_active_tab`、`browser_reload_extension`、`browser_select_tab`、`browser_open_tab`、`browser_snapshot`、`browser_query_elements`、`browser_get_element`、`browser_debug_dom`、`browser_screenshot`、`browser_get_cookies`、`browser_locate_download`、`browser_wait_for_element`、`browser_wait_for_text`、`browser_wait_for_disappear`、`browser_wait_for_navigation`、`browser_wait_for_url`
+
+`browser_get_active_tab` 以 `chrome.windows.getLastFocused()` 为准，避免多窗口时误把隐藏窗口里的 active tab 当作当前目标。`browser_open_tab` 默认在最后聚焦的 Chrome 窗口打开；传入 `windowId` 可指定窗口，传入 `tabId` 时会复用并导航已有标签页；本地 acceptance 应优先复用同一窗口内的测试 tab，避免大量打开新标签。
+
+`browser_screenshot` 使用 `chrome.tabs.captureVisibleTab`，不注入页面 JS。为避免 `tabId` 指向 inactive tab 时静默截取同窗口当前活跃页，当前实现要求目标 tab 已经是窗口活跃 tab；否则返回 `success:false`，上游必须先显式 `browser_select_tab`。
+
+`browser_locate_download` 使用 background `chrome.downloads.search` 只读查询下载记录、本地路径、下载状态和字节进度。HID 触发下载前，上游应从 snapshot 保存 `href`、`download` 文件名和点击前时间戳，后续用 `sourceUrl` / `finalUrl` / `referrer`、`fileName`、`startedAfter` 定位下载记录，避免多次下载时误配本地文件。它可返回 `in_progress` / `interrupted` / `complete` 记录，不打开 `chrome://downloads`，不注入页面 JS，不把 mock DOM 标记当作下载位置或完成证据。
 
 ---
 
 ## 快照与 Ref 系统
 
-`browser_snapshot` 现在返回只读载荷，包含 `viewport`、`document`、`clickables` 三部分；顶层结果还会带 `tabId` 和 `target.{tabId,windowId,url,title}`。`viewport` 里除了 `innerWidth/Height`、`scrollX/Y`，还提供 `devicePixelRatio`、`screenX/Y`（内容视口左上角在屏幕上的位置）和可选的 `visualViewport`（pinch-zoom 的 scale + offset），供上游做页面坐标 → 屏幕坐标的换算。每个 clickable 会附带 16 位稳定 `signature`、`hitTestState`，以及位于真实生效区域内的随机 `clickPoint`。文件相关元素还会附带 `type` / `accept` / `multiple` / `download` 等语义字段。`clickables` 仅用于只读查询和定位，不再用于浏览器交互；`browser_query_elements` 和 `browser_get_element` 仍可能返回 ref，但这些 ref 不再驱动任何动作工具。`browser_debug_dom` 可按需获取详细 DOM 信息。
+`browser_snapshot` 现在返回只读载荷，包含 `viewport`、`document`、`clickables` 三部分；顶层结果还会带 `tabId` 和 `target.{tabId,windowId,url,title}`。`viewport` 里除了 `innerWidth/Height`、`outerWidth/Height`、`scrollX/Y`，还提供 `devicePixelRatio`、`screenX/Y`（浏览器窗口观察指标）和可选的 `visualViewport`（pinch-zoom 的 scale + offset）。这些字段不是权威 HID 屏幕坐标映射合同；绝对坐标归一化属于外部 HID 层职责。每个 clickable 会附带 16 位稳定 `signature`、`hitTestState`，以及位于真实生效区域内的随机 `clickPoint`。文件相关元素还会附带 `type` / `accept` / `multiple` / `href` / `download` 等语义字段。`clickables` 仅用于只读查询和定位，不再用于浏览器交互；`browser_query_elements` 和 `browser_get_element` 仍可能返回 ref，但这些 ref 不再驱动任何动作工具。`browser_debug_dom` 可按需获取详细 DOM 信息。
 
 ---
 

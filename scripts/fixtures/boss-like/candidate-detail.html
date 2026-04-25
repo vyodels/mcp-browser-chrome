@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>候选人详情 · 李青 · Recruiting Workspace</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark">R</div>
+          <div class="brand-copy">
+            <strong>Recruiting Workspace</strong>
+            <span>resume collection surface</span>
+          </div>
+        </div>
+        <div class="nav-group">
+          <a class="nav-link" href="./jobs.html">活跃职位</a>
+          <a class="nav-link" href="./candidates.html">候选人推荐</a>
+          <a class="nav-link active" href="./candidate-detail.html">候选人详情</a>
+        </div>
+        <div class="mini-candidate active">
+          <strong>李青</strong>
+          <span class="muted">国际销售工程师候选人</span>
+          <span class="pill">附件简历可见</span>
+        </div>
+      </aside>
+
+      <main class="main">
+        <section class="toolbar">
+          <div>
+            <h1>候选人详情</h1>
+            <p>目标是观察在线简历和附件入口，并把下载后的本地位置和状态收敛成业务级结果。</p>
+          </div>
+          <div class="toolbar-actions">
+            <a class="button-link secondary" href="./candidates.html">返回候选人列表</a>
+            <a class="button-link" href="/li-qing-resume.pdf" download="li-qing-resume.pdf">下载附件简历</a>
+          </div>
+        </section>
+
+        <div class="layout-three">
+          <section class="section-card">
+            <h2>候选人状态</h2>
+            <div class="timeline">
+              <div class="timeline-item">
+                <strong>今天 09:40</strong>
+                <span>候选人详情已打开，发现附件简历卡片与下载入口。</span>
+              </div>
+              <div class="timeline-item">
+                <strong>昨天 16:20</strong>
+                <span>候选人完成初筛，标记为可继续跟进。</span>
+              </div>
+            </div>
+          </section>
+
+          <section class="message-panel">
+            <div class="detail-header">
+              <div>
+                <h2>在线简历摘要</h2>
+                <p class="muted">这部分用于 scene reasoning，不代表最终 artifact 已定位或可归档。</p>
+              </div>
+              <span class="tag">在线简历可读</span>
+            </div>
+            <div class="resume-grid">
+              <div class="resume-card">
+                <h3>经历摘要</h3>
+                <p>5 年海外销售与解决方案经验，负责东南亚和中东区域客户拓展，擅长英文演示、售前澄清与跨团队协作。</p>
+              </div>
+              <div class="resume-card" id="resume-card">
+                <h3>附件简历</h3>
+                <p>文件名：<strong>li-qing-resume.pdf</strong></p>
+                <div class="facts">
+                  <span class="pill">PDF</span>
+                  <span class="pill">预计 2 页</span>
+                  <span class="pill">可下载</span>
+                </div>
+                <div class="toolbar-actions">
+                  <a class="button-link" href="/li-qing-resume.pdf" download="li-qing-resume.pdf">下载附件简历</a>
+                  <label class="button-link secondary" for="resume-upload">上传本地复核件</label>
+                </div>
+                <input id="resume-upload" type="file" accept="application/pdf,.pdf" />
+              </div>
+            </div>
+
+            <h2>沟通区</h2>
+            <textarea id="composer" name="chatComposer" placeholder="输入消息，和候选人打个招呼"></textarea>
+            <div class="message-row">
+              <span class="muted">下载定位和业务校验完成前，不应把“看到附件入口”当成完成。</span>
+              <button type="button" disabled>发送并开始沟通</button>
+            </div>
+          </section>
+
+          <aside class="summary-card">
+            <h2>候选人摘要</h2>
+            <dl>
+              <dt>姓名</dt>
+              <dd>李青</dd>
+              <dt>目标岗位</dt>
+              <dd>国际销售工程师</dd>
+              <dt>联系方式</dt>
+              <dd>138-0000-1288 / liqing@example.test</dd>
+              <dt>当前状态</dt>
+              <dd>已发现附件简历，待本地 artifact 定位</dd>
+            </dl>
+            <div class="resume-card">
+              <h3>AI 评估</h3>
+              <p>在线匹配度 86/100，离线简历待定位和业务校验。若下载成功，应继续写入共享工作区。</p>
+            </div>
+            <p class="footer-note">未来 browser fixture 可在这里补 cross-origin iframe 占位，用于验证 inaccessibleFrames。</p>
+          </aside>
+        </div>
+      </main>
+    </div>
+    <script>
+      window.addEventListener('load', () => {
+        document.getElementById('composer')?.focus()
+      })
+    </script>
+  </body>
+</html>
