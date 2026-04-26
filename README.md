@@ -57,6 +57,8 @@ Codex / MCP Client
   -> content script / Chrome APIs
 ```
 
+`mcp/server.mjs`、`native-host/host.mjs` 和 extension background bridge 都必须按 FIFO 串行执行 browser 命令。即使 MCP client 同时发来多个 `tools/call`，也不能让多个浏览器观察/标签页/下载查询命令并发进入同一个 Chrome 目标环境；上游 `recruit-agent` 会把这些只读观察与 VirtualHID 写入组合成连续的 browser observe -> HID write -> browser observe 时序。
+
 默认 host 名称：
 
 - `com.vyodels.browser_mcp`

@@ -43,6 +43,7 @@ const TOOLS = [
 
 let stdinBuffer = ''
 let transportMode = 'unknown'
+let toolCallQueue = Promise.resolve()
 
 function writeMessage(message) {
   const body = Buffer.from(JSON.stringify(message), 'utf8')
@@ -61,6 +62,16 @@ function sendResult(id, result) {
 
 function sendError(id, code, message) {
   writeMessage({ jsonrpc: '2.0', id, error: { code, message } })
+}
+
+function enqueueToolCall(id, params) {
+  toolCallQueue = toolCallQueue.then(
+    () => handleToolCall(id, params),
+    () => handleToolCall(id, params)
+  )
+  void toolCallQueue.catch((error) => {
+    process.stderr.write(`[browser-mcp] serialized tool call failed: ${error instanceof Error ? error.message : String(error)}\n`)
+  })
 }
 
 function extractMessages(chunk) {
@@ -291,7 +302,7 @@ async function handleMessage(message) {
       sendResult(id, { tools: TOOLS })
       return
     case 'tools/call':
-      await handleToolCall(id, params)
+      enqueueToolCall(id, params)
       return
     default:
       sendError(id, -32601, `Method not found: ${method}`)

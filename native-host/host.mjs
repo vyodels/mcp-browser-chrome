@@ -9,10 +9,12 @@ import path from 'node:path'
 const SOCKET_PATH = process.env.MCP_BROWSER_CHROME_SOCKET || path.join(os.tmpdir(), 'browser-mcp.sock')
 const DEBUG_STANDALONE = process.argv.includes('--debug-standalone')
 const LOG_PATH = path.join(os.tmpdir(), 'browser-mcp-native-host.log')
+const RESPONSE_TIMEOUT_MS = Number(process.env.MCP_BROWSER_CHROME_NATIVE_RESPONSE_TIMEOUT_MS || 15000)
 
 const pending = new Map()
 let nativeBuffer = Buffer.alloc(0)
 let shuttingDown = false
+let forwardQueue = Promise.resolve()
 
 function log(message) {
   const line = `[${new Date().toISOString()}] ${message}\n`
@@ -26,6 +28,68 @@ function writeNativeMessage(message) {
   const header = Buffer.alloc(4)
   header.writeUInt32LE(json.length, 0)
   process.stdout.write(Buffer.concat([header, json]))
+}
+
+function writeSocketResponse(socket, message) {
+  if (socket.destroyed) return
+  socket.write(`${JSON.stringify(message)}\n`)
+}
+
+function enqueueForward(request, socket) {
+  forwardQueue = forwardQueue.then(
+    () => forwardNativeRequest(request, socket),
+    () => forwardNativeRequest(request, socket)
+  )
+  void forwardQueue.catch((error) => {
+    log(`forward queue failed: ${error instanceof Error ? error.message : String(error)}`)
+  })
+}
+
+function forwardNativeRequest(request, socket) {
+  return new Promise((resolve) => {
+    if (socket.destroyed) {
+      resolve()
+      return
+    }
+
+    let settled = false
+    const finish = () => {
+      if (settled) return
+      settled = true
+      resolve()
+    }
+    const timeout = setTimeout(() => {
+      pending.delete(request.id)
+      writeSocketResponse(socket, {
+        id: request.id,
+        ok: false,
+        error: { message: `Native response timed out after ${RESPONSE_TIMEOUT_MS}ms` },
+      })
+      finish()
+    }, RESPONSE_TIMEOUT_MS)
+
+    pending.set(request.id, {
+      socket,
+      complete(parsed) {
+        clearTimeout(timeout)
+        writeSocketResponse(socket, parsed)
+        finish()
+      },
+    })
+
+    try {
+      writeNativeMessage(request)
+    } catch (error) {
+      pending.delete(request.id)
+      clearTimeout(timeout)
+      writeSocketResponse(socket, {
+        id: request.id,
+        ok: false,
+        error: { message: error instanceof Error ? error.message : String(error) },
+      })
+      finish()
+    }
+  })
 }
 
 function parseNativeMessages(chunk) {
@@ -46,7 +110,7 @@ function parseNativeMessages(chunk) {
     const entry = pending.get(parsed.id)
     if (!entry) continue
     pending.delete(parsed.id)
-    entry.socket.write(`${JSON.stringify(parsed)}\n`)
+    entry.complete(parsed)
   }
 }
 
@@ -117,16 +181,12 @@ const server = createServer((socket) => {
       }
 
       log(`forward request ${request.command.name}`)
-      pending.set(request.id, { socket })
-      writeNativeMessage(request)
+      enqueueForward(request, socket)
     }
   })
 
   socket.on('close', () => {
     log('socket client closed')
-    for (const [id, entry] of pending.entries()) {
-      if (entry.socket === socket) pending.delete(id)
-    }
   })
 })
 

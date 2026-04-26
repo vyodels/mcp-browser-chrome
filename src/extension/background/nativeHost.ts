@@ -11,6 +11,7 @@ export function createNativeHostBridge(
   let port: chrome.runtime.Port | null = null
   let reconnectTimer: number | null = null
   let connecting = false
+  let commandQueue: Promise<void> = Promise.resolve()
 
   const clearReconnectTimer = () => {
     if (reconnectTimer !== null) {
@@ -61,9 +62,7 @@ export function createNativeHostBridge(
     }
   }
 
-  const handleMessage = async (message: NativeBridgeRequest) => {
-    if (!message || message.type !== 'browser_command' || !message.id || !message.command) return
-
+  const executeQueuedCommand = async (message: NativeBridgeRequest) => {
     try {
       const result = await executeCommand(message.command)
       postResponse({
@@ -80,6 +79,18 @@ export function createNativeHostBridge(
         },
       })
     }
+  }
+
+  const handleMessage = (message: NativeBridgeRequest) => {
+    if (!message || message.type !== 'browser_command' || !message.id || !message.command) return
+
+    commandQueue = commandQueue.then(
+      () => executeQueuedCommand(message),
+      () => executeQueuedCommand(message)
+    )
+    void commandQueue.catch((error) => {
+      console.error('[native-host] command queue failed', error)
+    })
   }
 
   return {

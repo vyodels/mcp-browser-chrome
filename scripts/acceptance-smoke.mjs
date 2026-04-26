@@ -146,6 +146,7 @@ Default: run L1 static checks and L2 local runtime acceptance.
 run('npm', ['run', 'typecheck'])
 run('npm', ['run', 'build'])
 assertStaticContracts()
+run('npm', ['run', 'acceptance:mcp-serialization'])
 if (!l1Only) {
   run('npm', ['run', 'acceptance:complex-layout'])
   run('npm', ['run', 'acceptance:boss-mock'])
@@ -158,6 +159,7 @@ console.log(JSON.stringify({
     static: true,
     typecheck: true,
     build: true,
+    mcpSerialization: true,
     tools: EXPECTED_TOOLS.length,
     complexLayout: !l1Only,
     bossMock: !l1Only,
