@@ -54,6 +54,70 @@ async function getFocusedActiveTab(): Promise<chrome.tabs.Tab | undefined> {
   return tabs[0]
 }
 
+function positiveInteger(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : undefined
+}
+
+function parseReusableTabUrl(rawUrl: string): { href: string; origin: string } | undefined {
+  try {
+    const parsed = new URL(rawUrl)
+    if (!['http:', 'https:', 'file:'].includes(parsed.protocol)) return undefined
+    parsed.hash = ''
+    return { href: parsed.href, origin: parsed.origin }
+  } catch {
+    return undefined
+  }
+}
+
+function tabUrlReuseScore(tab: chrome.tabs.Tab, target: { href: string; origin: string }, focusedWindowId?: number): number {
+  if (!tab.url) return -1
+  const current = parseReusableTabUrl(tab.url)
+  if (!current) return -1
+
+  let score = -1
+  if (current.href === target.href) {
+    score = 100
+  } else if (current.origin === target.origin) {
+    score = 50
+  }
+  if (score < 0) return score
+  if (focusedWindowId && tab.windowId === focusedWindowId) score += 10
+  if (tab.active) score += 5
+  return score
+}
+
+async function findReusableTabForUrl(url: string, requestedWindowId?: number): Promise<{ tab: chrome.tabs.Tab; reason: 'exact_url' | 'same_origin' } | undefined> {
+  const target = parseReusableTabUrl(url)
+  if (!target) return undefined
+
+  const focusedWindowId = requestedWindowId ?? await getFocusedWindowId()
+  const tabs = await chrome.tabs.query(requestedWindowId ? { windowId: requestedWindowId } : {})
+  const candidates = tabs
+    .map((tab) => ({ tab, score: tabUrlReuseScore(tab, target, focusedWindowId) }))
+    .filter((candidate) => candidate.score >= 0 && candidate.tab.id)
+    .sort((a, b) => b.score - a.score || (a.tab.index ?? 0) - (b.tab.index ?? 0))
+  const best = candidates[0]
+  if (!best) return undefined
+  return {
+    tab: best.tab,
+    reason: best.score >= 100 ? 'exact_url' : 'same_origin',
+  }
+}
+
+async function moveTabToOwnWindowIfNeeded(tab: chrome.tabs.Tab, focused: boolean): Promise<chrome.tabs.Tab> {
+  if (!tab.id) throw new Error('Cannot detach tab without a tab id')
+  if (!tab.windowId) return tab
+
+  const windowTabs = await chrome.tabs.query({ windowId: tab.windowId })
+  if (windowTabs.length <= 1) {
+    if (focused) await chrome.windows.update(tab.windowId, { focused: true })
+    return await chrome.tabs.get(tab.id)
+  }
+
+  const createdWindow = await chrome.windows.create({ tabId: tab.id, focused })
+  return createdWindow.tabs?.[0] ?? await chrome.tabs.get(tab.id)
+}
+
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, errorMessage: string): Promise<T> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error(errorMessage)), timeoutMs)
@@ -467,6 +531,15 @@ async function locateDownload(args: Record<string, unknown>) {
     }
   }
 
+  const hasStructuredSelector = hasDownloadId
+    || !!fileName
+    || !!filenameRegex
+    || !!url
+    || !!urlRegex
+    || source.required
+    || !!startedAfter
+    || !!endedAfter
+
   const query: chrome.downloads.DownloadQuery = {
     limit,
     orderBy: ['-startTime'],
@@ -502,11 +575,15 @@ async function locateDownload(args: Record<string, unknown>) {
   if (requireComplete) query.state = 'complete'
   else if (states.length === 1) query.state = states[0]
 
+  const structuredQuery = queryText && hasStructuredSelector ? { ...query } : undefined
+  if (structuredQuery) delete structuredQuery.query
+
   const startedAt = Date.now()
   let items: chrome.downloads.DownloadItem[] = []
   let locatedItem: chrome.downloads.DownloadItem | undefined
   let candidateItems: chrome.downloads.DownloadItem[] = []
   let ambiguous = false
+  let queryFallbackUsed = false
 
   while (true) {
     items = await chrome.downloads.search(query)
@@ -520,6 +597,28 @@ async function locateDownload(args: Record<string, unknown>) {
     }))
     ambiguous = candidateItems.length > 1
     locatedItem = ambiguous && requireUnique && !allowAmbiguous ? undefined : candidateItems[0]
+
+    if (!locatedItem && structuredQuery) {
+      const fallbackItems = await chrome.downloads.search(structuredQuery)
+      const fallbackCandidates = fallbackItems.filter((item) => matchesLocatedArtifact(item, {
+        expectedExtensions,
+        states,
+        requireExists,
+        requireComplete,
+        requireSafe,
+        source,
+      }))
+      const fallbackAmbiguous = fallbackCandidates.length > 1
+      const fallbackLocated = fallbackAmbiguous && requireUnique && !allowAmbiguous ? undefined : fallbackCandidates[0]
+      if (fallbackLocated || (items.length === 0 && fallbackItems.length > 0)) {
+        queryFallbackUsed = true
+        items = fallbackItems
+        candidateItems = fallbackCandidates
+        ambiguous = fallbackAmbiguous
+        locatedItem = fallbackLocated
+      }
+    }
+
     if (locatedItem || Date.now() - startedAt >= waitMs) break
     await sleep(pollIntervalMs)
   }
@@ -576,6 +675,13 @@ async function locateDownload(args: Record<string, unknown>) {
       waitMs,
       pollIntervalMs,
       pathLocationEvidence: requireExists ? 'chrome.downloads.search.exists' : 'not_required',
+      queryFallback: structuredQuery
+        ? {
+            attempted: true,
+            used: queryFallbackUsed,
+            reason: 'structured_selectors_without_free_text_query',
+          }
+        : undefined,
     },
   }
 }
@@ -641,14 +747,46 @@ async function executeBrowserCommand(command: BrowserCommand): Promise<unknown> 
     }
 
     case 'browser_open_tab': {
-      const url = typeof args.url === 'string' ? args.url : 'about:blank'
+      const hasUrl = typeof args.url === 'string'
+      const url = hasUrl ? String(args.url) : 'about:blank'
       const active = args.active !== false
-      const targetTabId = typeof args.tabId === 'number' ? args.tabId : undefined
-      const requestedWindowId = typeof args.windowId === 'number' ? args.windowId : undefined
-      const focusedWindowId = requestedWindowId ?? await getFocusedWindowId()
-      const created = targetTabId
-        ? await chrome.tabs.update(targetTabId, { url, active })
-        : await chrome.tabs.create({ url, active, ...(focusedWindowId ? { windowId: focusedWindowId } : {}) })
+      const newWindow = args.newWindow === true
+      const targetTabId = positiveInteger(args.tabId)
+      const requestedWindowId = positiveInteger(args.windowId)
+      let created: chrome.tabs.Tab
+      let reused = false
+      let reuseReason: string | undefined
+
+      if (newWindow) {
+        if (targetTabId) {
+          await chrome.tabs.update(targetTabId, hasUrl ? { url, active: true } : { active: true })
+          created = await moveTabToOwnWindowIfNeeded(await chrome.tabs.get(targetTabId), active)
+          reused = true
+          reuseReason = 'tab_id'
+        } else {
+          const reusable = hasUrl ? await findReusableTabForUrl(url, requestedWindowId) : undefined
+          if (reusable?.tab.id) {
+            const updated = await chrome.tabs.update(reusable.tab.id, hasUrl ? { url, active: true } : { active: true })
+            created = await moveTabToOwnWindowIfNeeded(updated, active)
+            reused = true
+            reuseReason = reusable.reason
+          } else {
+            const createdWindow = await chrome.windows.create({ url, focused: active, type: 'normal' })
+            created = createdWindow.tabs?.[0] ?? (await chrome.tabs.query({ windowId: createdWindow.id }))[0]
+            if (!created) {
+              throw new Error('Failed to resolve tab from newly created Chrome window')
+            }
+          }
+        }
+      } else {
+        const focusedWindowId = requestedWindowId ?? await getFocusedWindowId()
+        created = targetTabId
+          ? await chrome.tabs.update(targetTabId, { url, active })
+          : await chrome.tabs.create({ url, active, ...(focusedWindowId ? { windowId: focusedWindowId } : {}) })
+        reused = !!targetTabId
+        reuseReason = targetTabId ? 'tab_id' : undefined
+      }
+
       if (active && created.windowId) {
         await chrome.windows.update(created.windowId, { focused: true })
       }
@@ -656,7 +794,9 @@ async function executeBrowserCommand(command: BrowserCommand): Promise<unknown> 
       return {
         success: true,
         tabId: created.id,
-        reused: !!targetTabId,
+        reused,
+        reuseReason,
+        newWindow,
         tab: {
           id: created.id,
           url: created.url ?? '',

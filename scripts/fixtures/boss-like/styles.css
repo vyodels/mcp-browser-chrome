@@ -318,6 +318,12 @@ button.secondary,
   gap: 12px;
 }
 
+.outreach-status {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
 .timeline {
   display: grid;
   gap: 12px;

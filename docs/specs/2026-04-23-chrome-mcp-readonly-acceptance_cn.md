@@ -156,7 +156,7 @@ browser_wait_for_disappear, browser_screenshot, browser_get_cookies, browser_loc
 | `browser_list_tabs` | `{}` | `success === true` 且 `tabs.length ≥ 1` |
 | `browser_get_active_tab` | `{}` | `success === true` 且 `tab.id` 为数字 |
 | `browser_reload_extension` | `{}` | 仅单步调试时人工执行；自动 acceptance 不应在运行中调用，避免 reload 断开当前 MCP/native-host 通道 |
-| `browser_open_tab` | 优先用 `{ tabId: <同一聚焦窗口内既有 scratch tab>, windowId: <focusedWindowId>, url: "about:blank", active: false }`；没有可复用 tab 时才用 `{ windowId: <focusedWindowId>, url: "about:blank", active: false }` | `success === true` 且 `tabId` 为数字；记录 `scratchTabId`，重复回归应复用该 tab 而不是持续新开 |
+| `browser_open_tab` | 优先用 `{ tabId: <同一聚焦窗口内既有 scratch tab>, windowId: <focusedWindowId>, url: "about:blank", active: false }`；没有可复用 tab 时才用 `{ windowId: <focusedWindowId>, url: "about:blank", active: false }`；招聘执行目标可显式传 `newWindow: true`，但必须先复用 / 拆分已有同 URL 或同 origin tab，找不到才创建独立普通 Chrome 窗口 | `success === true` 且 `tabId` 为数字；记录 `scratchTabId`，重复回归应复用该 tab 而不是持续新开；`newWindow` 只用于目标窗口隔离，不应用于循环 smoke 大量开窗 |
 | `browser_select_tab` | `{ tabId: <3.1.2 拿到的 active.id> }` | `success === true` |
 | `browser_snapshot` | `{}` | 详见 3.2 |
 | `browser_query_elements` | `{ selector: "a" }` | `success === true`，`matches` 为数组 |
@@ -459,7 +459,7 @@ Agent 跑完后产出一份 markdown 报告，结构如下：
 | 2.3 `permissions` 超集 | 有人偷偷加回 `storage`/`tabGroups` 或把 `downloads` 用成下载动作 | `git log manifest.json` |
 | 2.4 命中 `world: 'MAIN'` | 新功能绕过隐身规则 | 看 PR diff |
 | 2.4 命中 `dispatchEvent(new MouseEvent` | 有人加回交互工具 | 检查 `src/extension/content/` 新文件 |
-| 3.1 某工具 smoke 失败 | native host / socket 未起来 | `ls $TMPDIR/browser-mcp.sock` + `chrome://extensions` 重新加载 |
+| 3.1 某工具 smoke 失败 | native host / socket 未起来 | 先运行 `npm run health:runtime`；如果 socket 缺失，复用现有普通 Chrome 窗口打开/聚焦普通网页唤醒扩展 bridge，仍失败再在 `chrome://extensions` 手动 reload 当前 unpacked `dist/` |
 | 3.5 Sannysoft 出现 failed | Chrome 自身指纹变化 / navigator.webdriver 被意外设为 true | 先在裸 Chrome（新建 profile）跑一遍对照 |
 | 3.7 CreepJS trust < 60 | 装了其他 stealth 插件 / 同一 profile 被污染 | 换全新 profile 只装 `dist/` |
 | 4.1 `chromeRuntimeId` 非 undefined | `manifest.json` 误加了 `web_accessible_resources` | 2.3 必然也会挂，回去看 2.3 |

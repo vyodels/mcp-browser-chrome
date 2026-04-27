@@ -13,6 +13,7 @@
     "acceptance:mcp-serialization": "node scripts/verify-mcp-serialization.mjs",
     "acceptance:smoke": "node scripts/acceptance-smoke.mjs",
     "mock:boss-recruiting": "node scripts/boss-recruiting-task-fixture.mjs",
+    "health:runtime": "node scripts/check-runtime-health.mjs",
     "setup:auto": "node scripts/setup-auto.mjs",
     "mcp:start": "node mcp/server.mjs",
     "native-host:start": "node native-host/host.mjs --debug-standalone",

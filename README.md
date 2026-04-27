@@ -83,7 +83,7 @@ P0 已接入：
 - `browser_get_active_tab`
 - `browser_reload_extension`
 - `browser_select_tab`
-- `browser_open_tab`（默认在最后聚焦的 Chrome 窗口打开；传 `windowId` 可指定窗口；传 `tabId` 时复用并导航已有 tab；acceptance 默认优先复用测试 tab）
+- `browser_open_tab`（默认在最后聚焦的 Chrome 窗口打开；传 `windowId` 可指定窗口；传 `tabId` 时复用并导航已有 tab；传 `newWindow: true` 时先复用 / 拆分已有同 URL 或同 origin tab，找不到才创建新的普通 Chrome 窗口；acceptance 默认优先复用测试 tab）
 - `browser_snapshot`
 - `browser_query_elements`
 - `browser_get_element`
@@ -290,6 +290,14 @@ npm run native-host:stdio
 3. 最近是否把新 `dist/` 载入当前扩展实例（优先在 `chrome://extensions` 手动 reload；`browser_reload_extension` 只用于单步调试）
 4. Chrome 打开普通网页后，扩展是否已自动拉起 native host
 5. MCP client 调用 tool 时，`mcp/server.mjs` 是否报 `Native host unavailable`
+
+可以先运行只读 socket/native-host 预检：
+
+```bash
+npm run health:runtime
+```
+
+这个检查不会关闭、打开或 reload Chrome 窗口。它只确认 `$MCP_BROWSER_CHROME_SOCKET`（默认 `os.tmpdir()/browser-mcp.sock`）是否存在，并通过 socket 发一个只读 `browser_get_active_tab` 探针。若 socket 已经消失，说明 `tools/list` 仍可能正常，但 browser tool call 会在进入 Chrome 前失败；恢复方式是复用现有普通 Chrome 窗口，打开或聚焦任意普通网页来唤醒扩展 bridge。若仍未恢复，再到 `chrome://extensions` 对当前已加载的 unpacked `dist/` 手动 reload。`browser_reload_extension` 只能在 socket 仍存活时作为维护动作使用，不能恢复已经缺失的 socket。
 
 常见误判：
 

@@ -88,8 +88,9 @@
             <textarea id="composer" name="chatComposer" placeholder="输入消息，和候选人打个招呼"></textarea>
             <div class="message-row">
               <span class="muted">下载定位和业务校验完成前，不应把“看到附件入口”当成完成。</span>
-              <button type="button" disabled>发送并开始沟通</button>
+              <button id="send-outreach" type="button" disabled>发送并开始沟通</button>
             </div>
+            <p id="outreach-status" class="outreach-status" aria-live="polite">尚未发送沟通消息。</p>
           </section>
 
           <aside class="summary-card">
@@ -115,7 +116,22 @@
     </div>
     <script>
       window.addEventListener('load', () => {
-        document.getElementById('composer')?.focus()
+        const composer = document.getElementById('composer')
+        const sendButton = document.getElementById('send-outreach')
+        const status = document.getElementById('outreach-status')
+        const updateSendState = () => {
+          sendButton.disabled = composer.value.trim().length === 0
+        }
+        composer?.focus()
+        composer?.addEventListener('input', updateSendState)
+        composer?.addEventListener('change', updateSendState)
+        sendButton?.addEventListener('click', () => {
+          if (sendButton.disabled) return
+          status.textContent = `沟通消息已记录：${composer.value.trim()}`
+          sendButton.textContent = '沟通已记录'
+          sendButton.disabled = true
+        })
+        updateSendState()
       })
     </script>
   </body>

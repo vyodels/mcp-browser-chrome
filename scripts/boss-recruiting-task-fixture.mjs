@@ -61,8 +61,9 @@ async function serveFile(req, res) {
   }
 }
 
-export async function createBossRecruitingTaskServer() {
+export async function createBossRecruitingTaskServer(options = {}) {
   const sockets = new Set()
+  const requestedPort = Number.isInteger(options.port) && options.port >= 0 ? options.port : 0
 
   const server = http.createServer((req, res) => {
     handleRequest(req, res).catch((error) => {
@@ -82,7 +83,7 @@ export async function createBossRecruitingTaskServer() {
     socket.on('close', () => sockets.delete(socket))
   })
 
-  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+  await new Promise((resolve) => server.listen(requestedPort, '127.0.0.1', resolve))
   const port = server.address().port
   const origin = `http://127.0.0.1:${port}`
   return {
@@ -101,7 +102,10 @@ export async function createBossRecruitingTaskServer() {
 }
 
 async function serveMockEnvironment() {
-  const fixture = await createBossRecruitingTaskServer()
+  const requestedPort = Number.parseInt(process.env.BOSS_RECRUITING_FIXTURE_PORT ?? '', 10)
+  const fixture = await createBossRecruitingTaskServer({
+    port: Number.isInteger(requestedPort) && requestedPort >= 0 ? requestedPort : 0,
+  })
   console.log(JSON.stringify({
     origin: fixture.origin,
     routes: fixture.routes,
