@@ -1,2 +1,3 @@
 #!/bin/sh
-exec "/Users/vyodels/.nvm/versions/node/v20.20.2/bin/node" "/Users/vyodels/AgentProjects/mcp-browser-chrome/native-host/host.mjs" "$@"
+SCRIPT_DIR=$(CDPATH= cd "$(dirname "$0")" && pwd)
+exec "${NODE:-node}" "$SCRIPT_DIR/host.mjs" "$@"

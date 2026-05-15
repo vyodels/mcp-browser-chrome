@@ -10,15 +10,12 @@ const SERVER_INFO = { name: 'browser-mcp', version: '1.0.0' }
 const PROTOCOL_VERSION = '2024-11-05'
 const BRIDGE_TIMEOUT_MS = Number(process.env.MCP_BROWSER_CHROME_BRIDGE_TIMEOUT_MS || 8000)
 const BRIDGE_TIMEOUT_GRACE_MS = 1500
-const LOCATE_DOWNLOAD_BRIDGE_TIMEOUT_MS = Number(process.env.MCP_BROWSER_CHROME_LOCATE_DOWNLOAD_BRIDGE_TIMEOUT_MS || 6500)
 const BRIDGE_RETRY_DELAYS_MS = [150, 500, 1200]
+const DEBUG_TOOLS_ENABLED = process.env.MCP_BROWSER_CHROME_DEBUG_TOOLS === '1'
 
-const TOOLS = [
+const DEFAULT_TOOL_DEFS = [
   ['browser_list_tabs', 'List open tabs across Chrome windows. Pass currentWindowOnly=true to restrict results to the focused window.', { currentWindowOnly: { type: 'boolean' } }],
   ['browser_get_active_tab', 'Get the active Chrome tab.', {}],
-  ['browser_reload_extension', 'Reload the browser-mcp Chrome extension so new dist files take effect.', {}],
-  ['browser_select_tab', 'Activate and focus a Chrome tab by tabId.', { tabId: { type: 'number' } }],
-  ['browser_open_tab', 'Open a tab with an optional URL in the focused Chrome window, navigate an existing tab when tabId is provided, or use newWindow=true to reuse/detach an existing matching URL/origin tab into its own normal Chrome window before creating a new one.', { tabId: { type: 'number' }, windowId: { type: 'number' }, url: { type: 'string' }, active: { type: 'boolean' }, newWindow: { type: 'boolean' } }],
   ['browser_snapshot', 'Read a structured page snapshot with viewport/document metadata and clickable element coordinates.', { tabId: { type: 'number' }, includeHtml: { type: 'boolean' }, includeText: { type: 'boolean' }, maxTextLength: { type: 'number' }, maxHtmlLength: { type: 'number' }, clickableLimit: { type: 'number' } }],
   ['browser_query_elements', 'Query matching elements by ref, selector, text, or role.', { tabId: { type: 'number' }, ref: { type: 'string' }, selector: { type: 'string' }, text: { type: 'string' }, role: { type: 'string' }, index: { type: 'number' }, limit: { type: 'number' }, visibleOnly: { type: 'boolean' } }],
   ['browser_get_element', 'Return the first matching element.', { tabId: { type: 'number' }, ref: { type: 'string' }, selector: { type: 'string' }, text: { type: 'string' }, role: { type: 'string' }, index: { type: 'number' }, visibleOnly: { type: 'boolean' } }],
@@ -27,10 +24,18 @@ const TOOLS = [
   ['browser_wait_for_text', 'Wait until page text contains the target string.', { tabId: { type: 'number' }, text: { type: 'string' }, timeoutMs: { type: 'number' }, pollIntervalMs: { type: 'number' } }],
   ['browser_wait_for_navigation', 'Wait for the target tab to finish navigation.', { tabId: { type: 'number' }, timeoutMs: { type: 'number' } }],
   ['browser_wait_for_disappear', 'Wait until a matching element disappears.', { tabId: { type: 'number' }, ref: { type: 'string' }, selector: { type: 'string' }, text: { type: 'string' }, role: { type: 'string' }, index: { type: 'number' }, limit: { type: 'number' }, visibleOnly: { type: 'boolean' }, timeoutMs: { type: 'number' }, pollIntervalMs: { type: 'number' } }],
-  ['browser_screenshot', 'Capture the visible tab as a screenshot.', { tabId: { type: 'number' } }],
-  ['browser_get_cookies', 'Get cookies. Filter by url, domain, or name. Use to verify login state.', { url: { type: 'string' }, domain: { type: 'string' }, name: { type: 'string' } }],
-  ['browser_locate_download', 'Locate a matching Chrome download artifact and return its local path/status through the background downloads API without page JS. For HID-triggered downloads, pass the pre-click snapshot href as sourceUrl plus startedAfter so the local file is correlated to the intended link. It can return in_progress, interrupted, or complete records; pass requireComplete/requireExists only when the caller needs those filters. Default lookup is immediate; waitMs is clamped below stdio caller timeouts, so callers should poll instead of requesting long waits.', { downloadId: { type: 'number' }, fileName: { type: 'string' }, filename: { type: 'string' }, filenameRegex: { type: 'string' }, url: { type: 'string' }, urlRegex: { type: 'string' }, sourceUrl: { type: 'string' }, sourceUrls: { type: 'array', items: { type: 'string' } }, sourceUrlCandidates: { type: 'array', items: { type: 'string' } }, sourceUrlRegex: { type: 'string' }, sourceUrlRegexes: { type: 'array', items: { type: 'string' } }, downloadUrl: { type: 'string' }, downloadUrls: { type: 'array', items: { type: 'string' } }, downloadUrlRegex: { type: 'string' }, href: { type: 'string' }, hrefRegex: { type: 'string' }, finalUrl: { type: 'string' }, finalUrls: { type: 'array', items: { type: 'string' } }, finalUrlRegex: { type: 'string' }, finalUrlRegexes: { type: 'array', items: { type: 'string' } }, referrer: { type: 'string' }, referrers: { type: 'array', items: { type: 'string' } }, referrerRegex: { type: 'string' }, referrerRegexes: { type: 'array', items: { type: 'string' } }, query: { type: 'string' }, expectedExtensions: { type: 'array', items: { type: 'string' } }, state: { type: 'string' }, states: { type: 'array', items: { type: 'string' } }, requireExists: { type: 'boolean' }, requireComplete: { type: 'boolean' }, requireSafe: { type: 'boolean' }, requireSourceCorrelation: { type: 'boolean' }, requireUnique: { type: 'boolean' }, allowAmbiguous: { type: 'boolean' }, startedAfter: { type: 'string' }, since: { type: 'string' }, endedAfter: { type: 'string' }, limit: { type: 'number' }, waitMs: { type: 'number' }, pollIntervalMs: { type: 'number' } }],
   ['browser_wait_for_url', 'Wait until the tab URL contains the given pattern string. Useful after login redirects or form submissions.', { tabId: { type: 'number' }, pattern: { type: 'string' }, timeoutMs: { type: 'number' } }],
+]
+
+const DEBUG_TOOL_DEFS = [
+  ['browser_reload_extension', 'Debug-only: reload the browser-mcp Chrome extension so new dist files take effect.', {}],
+  ['browser_select_tab', 'Debug-only: activate and focus a Chrome tab by tabId.', { tabId: { type: 'number' } }],
+  ['browser_open_tab', 'Debug-only: open or navigate a tab for local fixture setup.', { tabId: { type: 'number' }, windowId: { type: 'number' }, url: { type: 'string' }, active: { type: 'boolean' }, newWindow: { type: 'boolean' } }],
+]
+
+const TOOLS = [
+  ...DEFAULT_TOOL_DEFS,
+  ...(DEBUG_TOOLS_ENABLED ? DEBUG_TOOL_DEFS : []),
 ].map(([name, description, properties]) => ({
   name,
   description,
@@ -153,19 +158,13 @@ function isRetryableBridgeError(message) {
 }
 
 function resolveBridgeTimeoutMs(name, args = {}) {
-  if (name === 'browser_locate_download') {
-    const requestedWaitMs = Number(args.waitMs)
-    const expectedWaitMs = Number.isFinite(requestedWaitMs) && requestedWaitMs > 0 ? Math.min(requestedWaitMs, 3000) : 0
-    return Math.max(1500, Math.min(LOCATE_DOWNLOAD_BRIDGE_TIMEOUT_MS, expectedWaitMs + 2500))
-  }
-
   const requestedTimeout = Number(args.timeoutMs)
   if (!Number.isFinite(requestedTimeout) || requestedTimeout <= 0) return BRIDGE_TIMEOUT_MS
   return Math.max(BRIDGE_TIMEOUT_MS, requestedTimeout + BRIDGE_TIMEOUT_GRACE_MS)
 }
 
 function retryDelaysForBridgeCall(name) {
-  return name === 'browser_locate_download' ? [] : BRIDGE_RETRY_DELAYS_MS
+  return BRIDGE_RETRY_DELAYS_MS
 }
 
 function callBridgeOnce(name, args = {}) {

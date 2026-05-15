@@ -61,9 +61,17 @@ Codex / MCP Client
 
 ### MCP Tools (`browser_*`)
 
-Only these 16 tools are supported:
+Default `tools/list` exposes only these 11 read-only tools:
 
-`browser_list_tabs`, `browser_get_active_tab`, `browser_reload_extension`, `browser_select_tab`, `browser_open_tab`, `browser_snapshot`, `browser_query_elements`, `browser_get_element`, `browser_debug_dom`, `browser_screenshot`, `browser_get_cookies`, `browser_wait_for_element`, `browser_wait_for_text`, `browser_wait_for_disappear`, `browser_wait_for_navigation`, `browser_wait_for_url`
+`browser_list_tabs`, `browser_get_active_tab`, `browser_snapshot`, `browser_query_elements`, `browser_get_element`, `browser_debug_dom`, `browser_wait_for_element`, `browser_wait_for_text`, `browser_wait_for_disappear`, `browser_wait_for_navigation`, `browser_wait_for_url`
+
+Default runtime must not expose screenshot, cookie, download-history, tab mutation, or extension reload tools.
+
+For local fixture acceptance and one-off debugging only, set `MCP_BROWSER_CHROME_DEBUG_TOOLS=1` to expose:
+
+`browser_reload_extension`, `browser_select_tab`, `browser_open_tab`
+
+These tab tools are not part of the production/default MCP surface. They are intentionally page-visible because opening, selecting, and focusing tabs can fire lifecycle events.
 
 ### Snapshot + Ref System
 
@@ -74,7 +82,7 @@ Only these 16 tools are supported:
 - Chrome 114+ required
 - No runtime npm dependencies — pure TypeScript compiled via Vite
 - All data stays local — only `mcp/server.mjs` communicates over the network (to the MCP client's AI)
-- No synthetic page interaction helpers — the runtime is intentionally read-only aside from tab open/select/focus
+- No synthetic page interaction helpers — the default runtime is intentionally read-only
 - No inline event handlers in HTML (CSP) — all listeners via `addEventListener`
 - Unix socket path: `path.join(os.tmpdir(), 'browser-mcp.sock')` — never hardcode `/tmp/browser-mcp.sock`
-- New builds should be applied via `browser_reload_extension`; if the MCP chain itself is not connected yet, reload the unpacked extension once in `chrome://extensions`
+- New builds should normally be applied from `chrome://extensions`; `browser_reload_extension` is debug-only and requires `MCP_BROWSER_CHROME_DEBUG_TOOLS=1`

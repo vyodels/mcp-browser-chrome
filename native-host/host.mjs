@@ -10,6 +10,32 @@ const SOCKET_PATH = process.env.MCP_BROWSER_CHROME_SOCKET || path.join(os.tmpdir
 const DEBUG_STANDALONE = process.argv.includes('--debug-standalone')
 const LOG_PATH = path.join(os.tmpdir(), 'browser-mcp-native-host.log')
 const RESPONSE_TIMEOUT_MS = Number(process.env.MCP_BROWSER_CHROME_NATIVE_RESPONSE_TIMEOUT_MS || 15000)
+const DEBUG_TOOLS_ENABLED = process.env.MCP_BROWSER_CHROME_DEBUG_TOOLS === '1'
+
+const DEFAULT_BROWSER_COMMANDS = [
+  'browser_list_tabs',
+  'browser_get_active_tab',
+  'browser_snapshot',
+  'browser_query_elements',
+  'browser_get_element',
+  'browser_debug_dom',
+  'browser_wait_for_element',
+  'browser_wait_for_text',
+  'browser_wait_for_navigation',
+  'browser_wait_for_disappear',
+  'browser_wait_for_url',
+]
+
+const DEBUG_BROWSER_COMMANDS = [
+  'browser_reload_extension',
+  'browser_select_tab',
+  'browser_open_tab',
+]
+
+const ALLOWED_BROWSER_COMMANDS = new Set([
+  ...DEFAULT_BROWSER_COMMANDS,
+  ...(DEBUG_TOOLS_ENABLED ? DEBUG_BROWSER_COMMANDS : []),
+])
 
 const pending = new Map()
 let nativeBuffer = Buffer.alloc(0)
@@ -127,6 +153,10 @@ function normalizeCommand(message) {
   }
 }
 
+function isAllowedBrowserCommand(name) {
+  return ALLOWED_BROWSER_COMMANDS.has(name)
+}
+
 function socketPermissionsHint() {
   const digest = createHash('sha1').update(SOCKET_PATH).digest('hex').slice(0, 8)
   return `${SOCKET_PATH}#${digest}`
@@ -177,6 +207,16 @@ const server = createServer((socket) => {
       const request = normalizeCommand(parsed)
       if (!request.command?.name) {
         socket.write(`${JSON.stringify({ id: request.id, ok: false, error: { message: 'Missing command name' } })}\n`)
+        continue
+      }
+
+      if (!isAllowedBrowserCommand(request.command.name)) {
+        log(`reject request ${request.command.name}`)
+        socket.write(`${JSON.stringify({
+          id: request.id,
+          ok: false,
+          error: { message: `Browser command not allowed by native host: ${request.command.name}` },
+        })}\n`)
         continue
       }
 

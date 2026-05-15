@@ -68,15 +68,19 @@ Codex / MCP Client
 
 ## MCP 工具列表（`browser_*`）
 
-只支持以下 17 个工具：
+默认 `tools/list` 只暴露以下 11 个只读工具：
 
-`browser_list_tabs`、`browser_get_active_tab`、`browser_reload_extension`、`browser_select_tab`、`browser_open_tab`、`browser_snapshot`、`browser_query_elements`、`browser_get_element`、`browser_debug_dom`、`browser_screenshot`、`browser_get_cookies`、`browser_locate_download`、`browser_wait_for_element`、`browser_wait_for_text`、`browser_wait_for_disappear`、`browser_wait_for_navigation`、`browser_wait_for_url`
+`browser_list_tabs`、`browser_get_active_tab`、`browser_snapshot`、`browser_query_elements`、`browser_get_element`、`browser_debug_dom`、`browser_wait_for_element`、`browser_wait_for_text`、`browser_wait_for_disappear`、`browser_wait_for_navigation`、`browser_wait_for_url`
 
-`browser_get_active_tab` 以 `chrome.windows.getLastFocused()` 为准，避免多窗口时误把隐藏窗口里的 active tab 当作当前目标。`browser_open_tab` 默认在最后聚焦的 Chrome 窗口打开；传入 `windowId` 可指定窗口，传入 `tabId` 时会复用并导航已有标签页；本地 acceptance 应优先复用同一窗口内的测试 tab，避免大量打开新标签。
+默认 runtime 不暴露 screenshot、cookie、下载记录、tab mutation 或 extension reload 工具。
 
-`browser_screenshot` 使用 `chrome.tabs.captureVisibleTab`，不注入页面 JS。为避免 `tabId` 指向 inactive tab 时静默截取同窗口当前活跃页，当前实现要求目标 tab 已经是窗口活跃 tab；否则返回 `success:false`，上游必须先显式 `browser_select_tab`。
+仅本地 fixture acceptance 和单步调试可临时设置 `MCP_BROWSER_CHROME_DEBUG_TOOLS=1`，额外暴露：
 
-`browser_locate_download` 使用 background `chrome.downloads.search` 只读查询下载记录、本地路径、下载状态和字节进度。HID 触发下载前，上游应从 snapshot 保存 `href`、`download` 文件名和点击前时间戳，后续用 `sourceUrl` / `finalUrl` / `referrer`、`fileName`、`startedAfter` 定位下载记录，避免多次下载时误配本地文件。它可返回 `in_progress` / `interrupted` / `complete` 记录，不打开 `chrome://downloads`，不注入页面 JS，不把 mock DOM 标记当作下载位置或完成证据。
+`browser_reload_extension`、`browser_select_tab`、`browser_open_tab`
+
+这些 tab 工具不属于生产 / 默认 MCP surface。它们会打开、切换或聚焦标签页，页面 JS 可以观察到生命周期事件，因此只用于本地 acceptance 和调试。
+
+`browser_get_active_tab` 以 `chrome.windows.getLastFocused()` 为准，避免多窗口时误把隐藏窗口里的 active tab 当作当前目标。
 
 ---
 
@@ -91,10 +95,10 @@ Codex / MCP Client
 - Chrome 114+ 必须
 - 无运行时 npm 依赖，纯 TypeScript，Vite 编译
 - 所有数据本地存储，仅 MCP client 侧 AI 会产生网络请求
-- 不保留页面交互辅助层；运行时只做只读查询和 tab 级控制
+- 不保留页面交互辅助层；默认 runtime 只做只读查询
 - HTML 不允许内联事件处理器（CSP），所有监听器通过 TS 文件 `addEventListener` 注册
 - Unix socket 路径：`path.join(os.tmpdir(), 'browser-mcp.sock')`，不可硬编码为 `/tmp/browser-mcp.sock`
-- 新构建生效优先走 `browser_reload_extension`；如果 MCP 链路尚未接通，再手动去 `chrome://extensions` reload 当前 unpacked 扩展
+- 新构建通常从 `chrome://extensions` 手动 reload 当前 unpacked 扩展；`browser_reload_extension` 是 debug-only 工具，必须设置 `MCP_BROWSER_CHROME_DEBUG_TOOLS=1`
 
 ---
 
@@ -104,7 +108,7 @@ Codex / MCP Client
 
 1. `npm run setup:auto` 是否执行成功
 2. Chrome 是否真正加载了 `dist/` 目录下的扩展
-3. 最近是否已通过 `browser_reload_extension` 或 `chrome://extensions` reload 当前 unpacked 扩展
+3. 最近是否已通过 `chrome://extensions` reload 当前 unpacked 扩展（`browser_reload_extension` 仅限 debug-only）
 4. 是否打开了至少一个普通网页（用于唤醒 background service worker）
 5. MCP client 调用工具时，`mcp/server.mjs` 是否输出 `Native host unavailable`
 

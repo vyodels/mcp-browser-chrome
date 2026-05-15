@@ -64,6 +64,7 @@ export interface WaitForConditionResponse {
 export type BrowserCommandName =
   | 'browser_list_tabs'
   | 'browser_get_active_tab'
+  // Debug-only tab management commands are not exposed by default MCP tools/list.
   | 'browser_reload_extension'
   | 'browser_select_tab'
   | 'browser_open_tab'
@@ -75,10 +76,7 @@ export type BrowserCommandName =
   | 'browser_wait_for_text'
   | 'browser_wait_for_navigation'
   | 'browser_wait_for_disappear'
-  | 'browser_get_cookies'
-  | 'browser_locate_download'
   | 'browser_wait_for_url'
-  | 'browser_screenshot'
 
 export interface BrowserCommand {
   name: BrowserCommandName

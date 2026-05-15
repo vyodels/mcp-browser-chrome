@@ -1,7 +1,9 @@
 import { spawn } from 'node:child_process'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { createBossRecruitingTaskServer } from './boss-recruiting-task-fixture.mjs'
 
-const PROJECT_ROOT = '/Users/vyodels/AgentProjects/mcp-browser-chrome'
+const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const MCP_TIMEOUT_MS = 20_000
 
 function sleep(ms) {
@@ -11,6 +13,10 @@ function sleep(ms) {
 function createMcpClient() {
   const child = spawn('node', ['mcp/server.mjs'], {
     cwd: PROJECT_ROOT,
+    env: {
+      ...process.env,
+      MCP_BROWSER_CHROME_DEBUG_TOOLS: '1',
+    },
     stdio: ['pipe', 'pipe', 'pipe'],
   })
 

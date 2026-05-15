@@ -10,6 +10,7 @@
     "acceptance:complex-layout": "node scripts/verify-complex-layout.mjs",
     "acceptance:boss-mock": "node scripts/verify-boss-recruiting-task.mjs",
     "acceptance:detectable-surface": "node scripts/verify-detectable-surface.mjs",
+    "acceptance:native-host-allowlist": "node scripts/verify-native-host-allowlist.mjs",
     "acceptance:mcp-serialization": "node scripts/verify-mcp-serialization.mjs",
     "acceptance:smoke": "node scripts/acceptance-smoke.mjs",
     "mock:boss-recruiting": "node scripts/boss-recruiting-task-fixture.mjs",

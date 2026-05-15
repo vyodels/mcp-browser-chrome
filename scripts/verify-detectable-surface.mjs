@@ -1,7 +1,9 @@
 import { spawn } from 'node:child_process'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { createDetectableSurfaceServer } from './detectable-surface-fixture.mjs'
 
-const PROJECT_ROOT = '/Users/vyodels/AgentProjects/mcp-browser-chrome'
+const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const MCP_TIMEOUT_MS = 20_000
 
 function sleep(ms) {
@@ -11,6 +13,10 @@ function sleep(ms) {
 function createMcpClient() {
   const child = spawn('node', ['mcp/server.mjs'], {
     cwd: PROJECT_ROOT,
+    env: {
+      ...process.env,
+      MCP_BROWSER_CHROME_DEBUG_TOOLS: '1',
+    },
     stdio: ['pipe', 'pipe', 'pipe'],
   })
 
@@ -153,29 +159,6 @@ async function waitForActiveTab(mcp, tabId, timeoutMs = 4000) {
   throw new Error(`tab ${tabId} did not become active`)
 }
 
-async function captureActiveScreenshot(mcp, tabId, timeoutMs = 5000) {
-  const startedAt = Date.now()
-  let last = null
-  while (Date.now() - startedAt < timeoutMs) {
-    await mcp.call('browser_select_tab', { tabId })
-    await waitForActiveTab(mcp, tabId)
-    last = await mcp.call('browser_screenshot', { tabId })
-    if (last.success === true) return last
-    await sleep(250)
-  }
-  return last ?? mcp.call('browser_screenshot', { tabId })
-}
-
-async function findCapturableWindowId(mcp) {
-  const listed = await mcp.call('browser_list_tabs', { currentWindowOnly: false }).catch(() => null)
-  const activeTabs = listed?.tabs?.filter((tab) => tab.active && /^https?:/.test(tab.url ?? '')) ?? []
-  for (const tab of activeTabs) {
-    const shot = await mcp.call('browser_screenshot', { tabId: tab.id }).catch(() => null)
-    if (shot?.success === true) return tab.windowId
-  }
-  return activeTabs[0]?.windowId
-}
-
 async function openReusableTab(mcp, url, titleIncludes, active = true, preferredWindowId = undefined) {
   const focused = await mcp.call('browser_get_active_tab').catch(() => null)
   const windowId = preferredWindowId ?? focused?.tab?.windowId
@@ -198,7 +181,8 @@ async function main() {
   const failures = []
 
   try {
-    const preferredWindowId = await findCapturableWindowId(mcp)
+    const focused = await mcp.call('browser_get_active_tab').catch(() => null)
+    const preferredWindowId = focused?.tab?.windowId
     const opened = await openReusableTab(mcp, fixture.routes.probe, 'browser MCP 可感知性检测页', true, preferredWindowId)
     await mcp.call('browser_wait_for_navigation', { tabId: opened.tabId, timeoutMs: 8000 }).catch(() => null)
     await mcp.call('browser_wait_for_text', { tabId: opened.tabId, text: 'detectable-surface-ready', timeoutMs: 12_000, pollIntervalMs: 200 })
@@ -215,23 +199,6 @@ async function main() {
       waitForText: await mcp.call('browser_wait_for_text', { tabId: opened.tabId, text: 'detectable-surface-ready', timeoutMs: 2000, pollIntervalMs: 100 }),
       waitForDisappear: await mcp.call('browser_wait_for_disappear', { tabId: opened.tabId, selector: '#surface-never-exists', timeoutMs: 500, pollIntervalMs: 100 }),
       debugDom: await mcp.call('browser_debug_dom', { tabId: opened.tabId }),
-      cookies: await mcp.call('browser_get_cookies', { url: fixture.routes.probe }),
-      downloadLocation: await mcp.call('browser_locate_download', {
-        sourceUrl: `${fixture.routes.probe}/no-such-download-${Date.now()}.pdf`,
-        expectedExtensions: ['pdf'],
-        waitMs: 0,
-        limit: 3,
-      }),
-    }
-    await mcp.call('browser_select_tab', { tabId: opened.tabId })
-    await waitForActiveTab(mcp, opened.tabId)
-    observeResults.screenshot = await captureActiveScreenshot(mcp, opened.tabId)
-
-    if (!observeResults.screenshot.success || !observeResults.screenshot.screenshotDataUrl?.startsWith('data:image/png;base64,')) {
-      failures.push('browser_screenshot did not return a PNG data URL for the active tab')
-    }
-    if (observeResults.downloadLocation.success !== true || observeResults.downloadLocation.found !== false || observeResults.downloadLocation.located !== false) {
-      failures.push('browser_locate_download did not return a stable negative location result')
     }
 
     await sleep(600)
@@ -246,11 +213,6 @@ async function main() {
     await mcp.call('browser_select_tab', { tabId: opened.tabId })
     await waitForActiveTab(mcp, opened.tabId)
     await mcp.call('browser_wait_for_text', { tabId: opened.tabId, text: 'detectable-surface-ready', timeoutMs: 4000, pollIntervalMs: 100 })
-    const inactiveScreenshot = await mcp.call('browser_screenshot', { tabId: secondary.tabId })
-    if (inactiveScreenshot.success !== false) {
-      failures.push('browser_screenshot should reject inactive tabId instead of silently capturing the active tab')
-    }
-
     const beforeSwitch = await readReport(mcp, opened.tabId, 'before tab switch')
     await mcp.call('browser_select_tab', { tabId: secondary.tabId })
     await sleep(300)
@@ -276,11 +238,6 @@ async function main() {
         untrustedEventTotal: observeSignals.untrustedTotal,
         mutationSummary: observeSignals.mutationSummary,
       },
-      screenshot: {
-        activeTabCapture: observeResults.screenshot.success === true,
-        inactiveTabRejected: inactiveScreenshot.success === false,
-        inactiveError: inactiveScreenshot.error,
-      },
       tabManagement: {
         jsVisibleByDesign: lifecycleDelta.visibilitychange > 0 || lifecycleDelta.focus > 0 || lifecycleDelta.blur > 0,
         lifecycleDelta,
@@ -288,7 +245,7 @@ async function main() {
       conclusion: {
         readOnlyObservationTools: failures.length === 0 ? 'not_detected_by_fixture_js' : 'detected_by_fixture_js',
         browserSelectTab: 'page_js_can_observe_visibility_focus_lifecycle',
-        browserScreenshot: 'not_detected_when_target_tab_is_already_active',
+        removedDefaultTools: 'cookie_download_screenshot_not_part_of_default_surface',
       },
       before,
       afterObserve,

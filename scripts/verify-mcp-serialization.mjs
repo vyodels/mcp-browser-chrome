@@ -3,9 +3,18 @@ import { createServer } from 'node:net'
 import { existsSync, rmSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
-const PROJECT_ROOT = '/Users/vyodels/AgentProjects/mcp-browser-chrome'
+const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const socketPath = path.join(os.tmpdir(), `browser-mcp-serialization-${process.pid}.sock`)
+const FORBIDDEN_DEFAULT_TOOLS = new Set([
+  'browser_get_cookies',
+  'browser_locate_download',
+  'browser_screenshot',
+  'browser_open_tab',
+  'browser_select_tab',
+  'browser_reload_extension',
+])
 
 if (existsSync(socketPath)) rmSync(socketPath, { force: true })
 
@@ -100,7 +109,13 @@ child.stderr.on('data', (chunk) => stderr.push(chunk.toString('utf8')))
 
 try {
   const responses = []
-  const wait = waitForResponses(responses, 3, child)
+  const wait = waitForResponses(responses, 4, child)
+  child.stdin.write(`${JSON.stringify({
+    jsonrpc: '2.0',
+    id: 0,
+    method: 'tools/list',
+    params: {},
+  })}\n`)
   for (const id of [1, 2, 3]) {
     child.stdin.write(`${JSON.stringify({
       jsonrpc: '2.0',
@@ -114,8 +129,16 @@ try {
   }
   await wait
 
-  const responseIds = responses.map((item) => item.id)
-  const observedResponseOrders = responses.map((item) => item.result?.structuredContent?.observedOrder)
+  const toolsList = responses.find((item) => item.id === 0)
+  const defaultToolNames = toolsList?.result?.tools?.map((tool) => tool.name) ?? []
+  const forbiddenTools = defaultToolNames.filter((name) => FORBIDDEN_DEFAULT_TOOLS.has(name))
+  if (forbiddenTools.length) {
+    throw new Error(`default tools/list exposed forbidden tools: ${forbiddenTools.join(', ')}`)
+  }
+
+  const callResponses = responses.filter((item) => item.id !== 0)
+  const responseIds = callResponses.map((item) => item.id)
+  const observedResponseOrders = callResponses.map((item) => item.result?.structuredContent?.observedOrder)
   if (JSON.stringify(responseIds) !== JSON.stringify([1, 2, 3])) {
     throw new Error(`MCP responses must preserve request order; got ${responseIds.join(', ')}`)
   }
@@ -130,6 +153,7 @@ try {
     success: true,
     maxActiveRequests,
     observedCommands,
+    defaultTools: defaultToolNames,
   }, null, 2))
 } finally {
   child.kill('SIGTERM')
