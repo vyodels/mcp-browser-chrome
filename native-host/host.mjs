@@ -18,7 +18,6 @@ const DEFAULT_BROWSER_COMMANDS = [
   'browser_snapshot',
   'browser_query_elements',
   'browser_get_element',
-  'browser_debug_dom',
   'browser_wait_for_element',
   'browser_wait_for_text',
   'browser_wait_for_navigation',
@@ -27,6 +26,7 @@ const DEFAULT_BROWSER_COMMANDS = [
 ]
 
 const DEBUG_BROWSER_COMMANDS = [
+  'browser_debug_dom',
   'browser_reload_extension',
   'browser_select_tab',
   'browser_open_tab',

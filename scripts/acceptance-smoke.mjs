@@ -13,7 +13,6 @@ const EXPECTED_TOOLS = [
   'browser_snapshot',
   'browser_query_elements',
   'browser_get_element',
-  'browser_debug_dom',
   'browser_wait_for_element',
   'browser_wait_for_text',
   'browser_wait_for_navigation',
@@ -21,6 +20,7 @@ const EXPECTED_TOOLS = [
   'browser_wait_for_url',
 ]
 const DEBUG_ONLY_TOOLS = [
+  'browser_debug_dom',
   'browser_reload_extension',
   'browser_select_tab',
   'browser_open_tab',
@@ -107,8 +107,7 @@ function assertManifest() {
       if ((manifest.permissions ?? []).includes(forbidden)) throw new Error(`${label} must not include ${forbidden} permission`)
     }
     assertEqualSet(manifest.host_permissions ?? [], ['<all_urls>'], `${label}.host_permissions`)
-    if (manifest.content_scripts?.[0]?.all_frames !== false) throw new Error(`${label} content_scripts[0].all_frames must be false`)
-    assertEqualSet(manifest.content_scripts?.[0]?.matches ?? [], ['<all_urls>'], `${label} content_scripts[0].matches`)
+    if ((manifest.content_scripts ?? []).length !== 0) throw new Error(`${label} must not include static content_scripts`)
   }
   for (const forbidden of ['web_accessible_resources', 'externally_connectable', 'key']) {
     if (forbidden in distManifest) throw new Error(`dist manifest must not include ${forbidden}`)

@@ -11,6 +11,7 @@ const FORBIDDEN_DEFAULT_TOOLS = new Set([
   'browser_get_cookies',
   'browser_locate_download',
   'browser_screenshot',
+  'browser_debug_dom',
   'browser_open_tab',
   'browser_select_tab',
   'browser_reload_extension',
@@ -22,6 +23,7 @@ let activeRequests = 0
 let maxActiveRequests = 0
 let observedOrder = 0
 const observedCommands = []
+const observedRequests = []
 
 const fakeBridge = createServer((socket) => {
   let buffer = ''
@@ -38,6 +40,7 @@ const fakeBridge = createServer((socket) => {
       maxActiveRequests = Math.max(maxActiveRequests, activeRequests)
       const order = ++observedOrder
       observedCommands.push(request.command?.name)
+      observedRequests.push(request)
 
       setTimeout(() => {
         socket.write(`${JSON.stringify({
@@ -47,6 +50,7 @@ const fakeBridge = createServer((socket) => {
             success: true,
             observedOrder: order,
             command: request.command?.name,
+            arguments: request.command?.arguments ?? {},
           },
         })}\n`)
         activeRequests -= 1
@@ -109,7 +113,7 @@ child.stderr.on('data', (chunk) => stderr.push(chunk.toString('utf8')))
 
 try {
   const responses = []
-  const wait = waitForResponses(responses, 4, child)
+  const wait = waitForResponses(responses, 6, child)
   child.stdin.write(`${JSON.stringify({
     jsonrpc: '2.0',
     id: 0,
@@ -127,6 +131,35 @@ try {
       },
     })}\n`)
   }
+  child.stdin.write(`${JSON.stringify({
+    jsonrpc: '2.0',
+    id: 4,
+    method: 'tools/call',
+    params: {
+      name: 'browser_wait_for_element',
+      arguments: {
+        tabId: 123,
+        selector: '#'.padEnd(900, 'x'),
+        timeoutMs: 120000,
+        pollIntervalMs: 5,
+        limit: 1000,
+      },
+    },
+  })}\n`)
+  child.stdin.write(`${JSON.stringify({
+    jsonrpc: '2.0',
+    id: 5,
+    method: 'tools/call',
+    params: {
+      name: 'browser_snapshot',
+      arguments: {
+        tabId: 123,
+        maxTextLength: 999999,
+        maxHtmlLength: 999999,
+        clickableLimit: 999999,
+      },
+    },
+  })}\n`)
   await wait
 
   const toolsList = responses.find((item) => item.id === 0)
@@ -139,14 +172,33 @@ try {
   const callResponses = responses.filter((item) => item.id !== 0)
   const responseIds = callResponses.map((item) => item.id)
   const observedResponseOrders = callResponses.map((item) => item.result?.structuredContent?.observedOrder)
-  if (JSON.stringify(responseIds) !== JSON.stringify([1, 2, 3])) {
+  if (JSON.stringify(responseIds) !== JSON.stringify([1, 2, 3, 4, 5])) {
     throw new Error(`MCP responses must preserve request order; got ${responseIds.join(', ')}`)
   }
-  if (JSON.stringify(observedResponseOrders) !== JSON.stringify([1, 2, 3])) {
+  if (JSON.stringify(observedResponseOrders) !== JSON.stringify([1, 2, 3, 4, 5])) {
     throw new Error(`bridge call order mismatch; got ${observedResponseOrders.join(', ')}`)
   }
   if (maxActiveRequests !== 1) {
     throw new Error(`browser MCP bridge calls must be serialized; maxActiveRequests=${maxActiveRequests}`)
+  }
+  const waitArgs = observedRequests.find((item) => item.command?.name === 'browser_wait_for_element')?.command?.arguments ?? {}
+  if (
+    waitArgs.targetPolicy !== 'strict' ||
+    waitArgs.selector?.length !== 512 ||
+    waitArgs.timeoutMs !== 30000 ||
+    waitArgs.pollIntervalMs !== 100 ||
+    waitArgs.limit !== 100
+  ) {
+    throw new Error(`observe wait hardening args mismatch: ${JSON.stringify(waitArgs)}`)
+  }
+  const snapshotArgs = observedRequests.find((item) => item.command?.name === 'browser_snapshot')?.command?.arguments ?? {}
+  if (
+    snapshotArgs.targetPolicy !== 'strict' ||
+    snapshotArgs.maxTextLength !== 60000 ||
+    snapshotArgs.maxHtmlLength !== 120000 ||
+    snapshotArgs.clickableLimit !== 500
+  ) {
+    throw new Error(`snapshot budget hardening args mismatch: ${JSON.stringify(snapshotArgs)}`)
   }
 
   console.log(JSON.stringify({

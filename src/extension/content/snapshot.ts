@@ -6,6 +6,11 @@ const DEFAULT_TEXT_LENGTH = 6000
 const DEFAULT_HTML_LENGTH = 30000
 const DEFAULT_CLICKABLE_LIMIT = 500
 const TEXT_SNIPPET_LIMIT = 120
+export const MAX_TEXT_LENGTH = 60_000
+export const MAX_HTML_LENGTH = 120_000
+export const MAX_CLICKABLE_LIMIT = 500
+export const MAX_QUERY_LIMIT = 100
+export const MAX_SELECTOR_LENGTH = 512
 
 const CLICKABLE_SELECTORS = [
   'a[href]',
@@ -57,6 +62,12 @@ type InaccessibleFrameCandidate = InaccessibleFrameRegion
 const HIT_TEST_MAX_GRID = 6
 const HIT_TEST_MIN_CELL_SIZE = 40
 const LANDING_ZONE_INSET_RATIO = 0.3
+
+export function clampPositiveInteger(value: unknown, fallback: number, max: number): number {
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback
+  return Math.min(Math.floor(parsed), max)
+}
 
 function computeCssPath(el: Element): string {
   const segments: string[] = []
@@ -581,18 +592,23 @@ function walkDocument(
 }
 
 export function queryDeepElements(selector: string): Element[] {
+  if (!selector || selector.length > MAX_SELECTOR_LENGTH) return []
   const matches: Element[] = []
-  walkDocument(window, {
-    shadowDepth: 0,
-    viewportOffsetTop: 0,
-    viewportOffsetLeft: 0,
-    documentOffsetTop: 0,
-    documentOffsetLeft: 0,
-  }, ({ element }) => {
-    if (element.matches(selector)) {
-      matches.push(element)
-    }
-  })
+  try {
+    walkDocument(window, {
+      shadowDepth: 0,
+      viewportOffsetTop: 0,
+      viewportOffsetLeft: 0,
+      documentOffsetTop: 0,
+      documentOffsetLeft: 0,
+    }, ({ element }) => {
+      if (element.matches(selector)) {
+        matches.push(element)
+      }
+    })
+  } catch {
+    return []
+  }
 
   return matches
 }
@@ -707,9 +723,9 @@ function collectSnapshotArtifacts(limit = DEFAULT_CLICKABLE_LIMIT): {
 }
 
 export function buildSnapshot(req: SnapshotRequest = {}): PageSnapshot {
-  const textLength = req.maxTextLength ?? DEFAULT_TEXT_LENGTH
-  const htmlLength = req.maxHtmlLength ?? DEFAULT_HTML_LENGTH
-  const clickableLimit = req.clickableLimit ?? DEFAULT_CLICKABLE_LIMIT
+  const textLength = clampPositiveInteger(req.maxTextLength, DEFAULT_TEXT_LENGTH, MAX_TEXT_LENGTH)
+  const htmlLength = clampPositiveInteger(req.maxHtmlLength, DEFAULT_HTML_LENGTH, MAX_HTML_LENGTH)
+  const clickableLimit = clampPositiveInteger(req.clickableLimit, DEFAULT_CLICKABLE_LIMIT, MAX_CLICKABLE_LIMIT)
   const { clickables, inaccessibleFrames } = collectSnapshotArtifacts(clickableLimit)
 
   return {

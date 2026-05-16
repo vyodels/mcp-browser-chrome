@@ -68,15 +68,15 @@ Codex / MCP Client
 
 ## MCP 工具列表（`browser_*`）
 
-默认 `tools/list` 只暴露以下 11 个只读工具：
+默认 `tools/list` 只暴露以下 10 个只读工具：
 
-`browser_list_tabs`、`browser_get_active_tab`、`browser_snapshot`、`browser_query_elements`、`browser_get_element`、`browser_debug_dom`、`browser_wait_for_element`、`browser_wait_for_text`、`browser_wait_for_disappear`、`browser_wait_for_navigation`、`browser_wait_for_url`
+`browser_list_tabs`、`browser_get_active_tab`、`browser_snapshot`、`browser_query_elements`、`browser_get_element`、`browser_wait_for_element`、`browser_wait_for_text`、`browser_wait_for_disappear`、`browser_wait_for_navigation`、`browser_wait_for_url`
 
 默认 runtime 不暴露 screenshot、cookie、下载记录、tab mutation 或 extension reload 工具。
 
 仅本地 fixture acceptance 和单步调试可临时设置 `MCP_BROWSER_CHROME_DEBUG_TOOLS=1`，额外暴露：
 
-`browser_reload_extension`、`browser_select_tab`、`browser_open_tab`
+`browser_debug_dom`、`browser_reload_extension`、`browser_select_tab`、`browser_open_tab`
 
 这些 tab 工具不属于生产 / 默认 MCP surface。它们会打开、切换或聚焦标签页，页面 JS 可以观察到生命周期事件，因此只用于本地 acceptance 和调试。
 
@@ -86,7 +86,7 @@ Codex / MCP Client
 
 ## 快照与 Ref 系统
 
-`browser_snapshot` 现在返回只读载荷，包含 `viewport`、`document`、`clickables` 三部分；顶层结果还会带 `tabId` 和 `target.{tabId,windowId,url,title}`。`viewport` 里除了 `innerWidth/Height`、`outerWidth/Height`、`scrollX/Y`，还提供 `devicePixelRatio`、`screenX/Y`（浏览器窗口观察指标）和可选的 `visualViewport`（pinch-zoom 的 scale + offset）。这些字段不是权威 HID 屏幕坐标映射合同；绝对坐标归一化属于外部 HID 层职责。每个 clickable 会附带 16 位稳定 `signature`、`hitTestState`，以及位于真实生效区域内的随机 `clickPoint`。文件相关元素还会附带 `type` / `accept` / `multiple` / `href` / `download` 等语义字段。`clickables` 仅用于只读查询和定位，不再用于浏览器交互；`browser_query_elements` 和 `browser_get_element` 仍可能返回 ref，但这些 ref 不再驱动任何动作工具。`browser_debug_dom` 可按需获取详细 DOM 信息。
+`browser_snapshot` 现在返回只读载荷，包含 `viewport`、`document`、`clickables` 三部分；顶层结果还会带 `tabId` 和 `target.{tabId,windowId,url,title}`。`viewport` 里除了 `innerWidth/Height`、`outerWidth/Height`、`scrollX/Y`，还提供 `devicePixelRatio`、`screenX/Y`（浏览器窗口观察指标）和可选的 `visualViewport`（pinch-zoom 的 scale + offset）。这些字段不是权威 HID 屏幕坐标映射合同；绝对坐标归一化属于外部 HID 层职责。每个 clickable 会附带 16 位稳定 `signature`、`hitTestState`，以及位于真实生效区域内的随机 `clickPoint`。文件相关元素还会附带 `type` / `accept` / `multiple` / `href` / `download` 等语义字段。`clickables` 仅用于只读查询和定位，不再用于浏览器交互；`browser_query_elements` 和 `browser_get_element` 仍可能返回 ref，但这些 ref 不再驱动任何动作工具。`browser_debug_dom` 仅在启用 debug tools 时提供详细 DOM 信息。
 
 ---
 

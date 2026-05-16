@@ -2,6 +2,8 @@ import type { BrowserCommand, SnapshotRequest } from '../shared/protocol'
 import { relayToContentScript, resolveTab } from './contentBridge'
 import { createNativeHostBridge } from './nativeHost'
 
+const MAX_WAIT_TIMEOUT_MS = 30_000
+
 function describeTargetTab(tab: chrome.tabs.Tab) {
   return {
     tabId: tab.id,
@@ -26,6 +28,66 @@ async function getFocusedActiveTab(): Promise<chrome.tabs.Tab | undefined> {
 
 function positiveInteger(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : undefined
+}
+
+function clampPositiveNumber(value: unknown, fallback: number, max: number): number {
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback
+  return Math.min(parsed, max)
+}
+
+function parseExpectedOrigin(value: unknown): string | undefined {
+  if (typeof value !== 'string' || !value.trim()) return undefined
+  try {
+    return new URL(value).origin
+  } catch {
+    return undefined
+  }
+}
+
+function parseExpectedHost(value: unknown): string | undefined {
+  if (typeof value !== 'string' || !value.trim()) return undefined
+  return value.trim().toLowerCase()
+}
+
+function validateTargetPolicy(tab: chrome.tabs.Tab, args: Record<string, unknown>): { success: true } | { success: false; error: string } {
+  const expectedHost = parseExpectedHost(args.expectedHost)
+  const expectedOrigin = parseExpectedOrigin(args.expectedOrigin)
+  if (!expectedHost && !expectedOrigin) return { success: true }
+  if (!tab.url) return { success: false, error: '目标标签页没有可验证 URL' }
+
+  let parsed: URL
+  try {
+    parsed = new URL(tab.url)
+  } catch {
+    return { success: false, error: `目标标签页 URL 无法解析: ${tab.url}` }
+  }
+
+  if (expectedHost && parsed.host.toLowerCase() !== expectedHost) {
+    return { success: false, error: `目标 host 不匹配: expected ${expectedHost}, got ${parsed.host}` }
+  }
+  if (expectedOrigin && parsed.origin !== expectedOrigin) {
+    return { success: false, error: `目标 origin 不匹配: expected ${expectedOrigin}, got ${parsed.origin}` }
+  }
+  return { success: true }
+}
+
+async function resolveObservableTarget(args: Record<string, unknown>): Promise<
+  | { success: true; tab: chrome.tabs.Tab }
+  | { success: false; error: string }
+> {
+  const strict = args.targetPolicy !== 'compat'
+  const tabId = positiveInteger(args.tabId)
+  if (strict && !tabId) {
+    return { success: false, error: 'strict target policy requires explicit tabId' }
+  }
+
+  const tab = await resolveTab(tabId)
+  if (!tab?.id) return { success: false, error: '没有活跃标签页' }
+
+  const policy = validateTargetPolicy(tab, args)
+  if (!policy.success) return policy
+  return { success: true, tab }
 }
 
 function parseReusableTabUrl(rawUrl: string): { href: string; origin: string } | undefined {
@@ -280,8 +342,9 @@ async function executeBrowserCommand(command: BrowserCommand): Promise<unknown> 
     }
 
     case 'browser_snapshot': {
-      const target = await resolveTab(typeof args.tabId === 'number' ? args.tabId : undefined)
-      if (!target?.id) return { success: false, error: '没有活跃标签页' }
+      const resolved = await resolveObservableTarget(args)
+      if (!resolved.success) return resolved
+      const target = resolved.tab
 
       const result = await relayToContentScript<{ success: boolean; snapshot?: unknown; error?: string }>(
         target,
@@ -292,8 +355,9 @@ async function executeBrowserCommand(command: BrowserCommand): Promise<unknown> 
     }
 
     case 'browser_debug_dom': {
-      const target = await resolveTab(typeof args.tabId === 'number' ? args.tabId : undefined)
-      if (!target?.id) return { success: false, error: '没有活跃标签页' }
+      const resolved = await resolveObservableTarget(args)
+      if (!resolved.success) return resolved
+      const target = resolved.tab
 
       const result = await relayToContentScript<{ success: boolean; snapshot?: unknown; error?: string }>(
         target,
@@ -305,8 +369,9 @@ async function executeBrowserCommand(command: BrowserCommand): Promise<unknown> 
 
     case 'browser_query_elements':
     case 'browser_get_element': {
-      const target = await resolveTab(typeof args.tabId === 'number' ? args.tabId : undefined)
-      if (!target?.id) return { success: false, error: '没有活跃标签页' }
+      const resolved = await resolveObservableTarget(args)
+      if (!resolved.success) return resolved
+      const target = resolved.tab
 
       const payload = command.name === 'browser_get_element'
         ? { ...args, limit: 1 }
@@ -324,8 +389,9 @@ async function executeBrowserCommand(command: BrowserCommand): Promise<unknown> 
     case 'browser_wait_for_element':
     case 'browser_wait_for_text':
     case 'browser_wait_for_disappear': {
-      const target = await resolveTab(typeof args.tabId === 'number' ? args.tabId : undefined)
-      if (!target?.id) return { success: false, error: '没有活跃标签页' }
+      const resolved = await resolveObservableTarget(args)
+      if (!resolved.success) return resolved
+      const target = resolved.tab
 
       const typeMap: Record<string, string> = {
         browser_wait_for_element: 'WAIT_FOR_ELEMENT',
@@ -341,17 +407,21 @@ async function executeBrowserCommand(command: BrowserCommand): Promise<unknown> 
     }
 
     case 'browser_wait_for_navigation': {
-      const target = await resolveTab(typeof args.tabId === 'number' ? args.tabId : undefined)
-      if (!target?.id) return { success: false, error: '没有活跃标签页' }
-      return await waitForNavigation(target.id, Number(args.timeoutMs) || 10_000)
+      const resolved = await resolveObservableTarget(args)
+      if (!resolved.success) return resolved
+      const target = resolved.tab
+      if (!target.id) return { success: false, error: '没有活跃标签页' }
+      return await waitForNavigation(target.id, clampPositiveNumber(args.timeoutMs, 10_000, MAX_WAIT_TIMEOUT_MS))
     }
 
     case 'browser_wait_for_url': {
-      const target = await resolveTab(typeof args.tabId === 'number' ? args.tabId : undefined)
-      if (!target?.id) return { success: false, error: '没有活跃标签页' }
+      const resolved = await resolveObservableTarget(args)
+      if (!resolved.success) return resolved
+      const target = resolved.tab
+      if (!target.id) return { success: false, error: '没有活跃标签页' }
 
       const pattern = typeof args.pattern === 'string' ? args.pattern : ''
-      const timeoutMs = Number(args.timeoutMs) || 10_000
+      const timeoutMs = clampPositiveNumber(args.timeoutMs, 10_000, MAX_WAIT_TIMEOUT_MS)
       const tabId = target.id
       const start = Date.now()
       const current = await chrome.tabs.get(tabId)

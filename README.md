@@ -86,7 +86,6 @@ Native Messaging 是本机 Chrome extension 和本机 native host 之间的 loca
 - `browser_snapshot`
 - `browser_query_elements`
 - `browser_get_element`
-- `browser_debug_dom`
 - `browser_wait_for_element`
 - `browser_wait_for_text`
 - `browser_wait_for_navigation`
@@ -97,6 +96,7 @@ Native Messaging 是本机 Chrome extension 和本机 native host 之间的 loca
 
 调试本地 fixture 时可以临时设置 `MCP_BROWSER_CHROME_DEBUG_TOOLS=1`，此时 MCP server 会额外暴露：
 
+- `browser_debug_dom`
 - `browser_reload_extension`
 - `browser_select_tab`
 - `browser_open_tab`
@@ -139,7 +139,8 @@ npm run acceptance:detectable-surface
 
 当前判定边界：
 
-- `browser_snapshot` / `browser_query_elements` / `browser_get_element` / `browser_debug_dom` / wait 类不应留下页面 JS 可观察信号。
+- `browser_snapshot` / `browser_query_elements` / `browser_get_element` / wait 类不应留下页面 JS 可观察信号。
+- `browser_debug_dom` 是 debug-only 工具，只在 `MCP_BROWSER_CHROME_DEBUG_TOOLS=1` 时暴露。
 - 默认 runtime surface 不包含 cookies、downloads、screenshot、tab mutation 或 extension reload 工具。
 - debug-only tab 打开 / 切换天然会触发页面可见的生命周期事件，所以只能用于本地 fixture 和单步排障。
 
@@ -348,7 +349,7 @@ npm run codex:mcp:install
 当前架构默认遵守：
 
 - 不使用 `localhost HTTP/WebSocket` 作为扩展桥接主通道
-- 不在页面主 world 常驻注入桥接脚本
+- 不声明默认 `<all_urls>` 静态 content script；观察命令按需向目标 tab 顶层 frame 注入 isolated content script
 - 内容脚本优先在 isolated world 执行
 - snapshot 默认只返回只读结构化数据，`viewport` 提供 `innerWidth/Height`、`outerWidth/Height`、`devicePixelRatio`、`screenX/Y`、`visualViewport` 等浏览器可观察窗口/页面指标；这些指标不是权威 HID 屏幕坐标映射合同，绝对坐标归一化属于外部 HID 层职责；返回顶层还会带 `tabId / windowId / url / title`
 - `clickables` 每项附带 16 位稳定 `signature`、`hitTestState`、随机 `clickPoint`，以及面向 scene reasoning 的只读状态字段：`value` / `placeholder` / `disabled` / `readonly` / `checked` / `selected` / `expanded` / `focused`

@@ -1,6 +1,6 @@
 import type { ClickableElement } from '../../types'
 import type { QueryElementsRequest } from '../shared/protocol'
-import { buildSnapshot, deriveRole, isVisible, normalizedElementText, queryDeepElements } from './snapshot'
+import { MAX_QUERY_LIMIT, buildSnapshot, clampPositiveInteger, deriveRole, isVisible, normalizedElementText, queryDeepElements } from './snapshot'
 import { getElementByRef } from './state'
 
 function matchesLocator(el: Element, locator: QueryElementsRequest): boolean {
@@ -17,7 +17,7 @@ function matchesLocator(el: Element, locator: QueryElementsRequest): boolean {
 
 function applyIndexAndLimit(matches: ClickableElement[], locator: QueryElementsRequest): ClickableElement[] {
   const indexed = locator.index === undefined ? matches : (matches[locator.index] ? [matches[locator.index]!] : [])
-  return indexed.slice(0, locator.limit ?? 20)
+  return indexed.slice(0, clampPositiveInteger(locator.limit, 20, MAX_QUERY_LIMIT))
 }
 
 export function queryElements(locator: QueryElementsRequest): ClickableElement[] {

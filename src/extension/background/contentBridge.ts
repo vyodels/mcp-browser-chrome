@@ -24,7 +24,7 @@ async function ensureContentScript(tab: chrome.tabs.Tab): Promise<{ success: tru
 
   try {
     await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
+      target: { tabId: tab.id, frameIds: [0] },
       files: ['content.js'],
     })
     return { success: true }

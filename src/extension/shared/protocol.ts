@@ -10,7 +10,14 @@ export interface ElementLocator {
   index?: number
 }
 
-export interface SnapshotRequest {
+export interface TargetPolicyRequest {
+  tabId?: number
+  expectedHost?: string
+  expectedOrigin?: string
+  targetPolicy?: 'strict' | 'compat'
+}
+
+export interface SnapshotRequest extends TargetPolicyRequest {
   includeHtml?: boolean
   includeText?: boolean
   maxTextLength?: number
@@ -18,7 +25,7 @@ export interface SnapshotRequest {
   clickableLimit?: number
 }
 
-export interface QueryElementsRequest extends ElementLocator {
+export interface QueryElementsRequest extends ElementLocator, TargetPolicyRequest {
   limit?: number
   visibleOnly?: boolean
 }
@@ -28,7 +35,7 @@ export interface WaitForElementRequest extends QueryElementsRequest {
   pollIntervalMs?: number
 }
 
-export interface WaitForTextRequest {
+export interface WaitForTextRequest extends TargetPolicyRequest {
   text: string
   timeoutMs?: number
   pollIntervalMs?: number

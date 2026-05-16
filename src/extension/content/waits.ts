@@ -1,9 +1,18 @@
 import type { QueryElementsRequest, WaitForConditionResponse, WaitForDisappearRequest, WaitForElementRequest, WaitForTextRequest } from '../shared/protocol'
-import { buildSnapshot, buildSnapshotSummary } from './snapshot'
+import { MAX_QUERY_LIMIT, buildSnapshot, buildSnapshotSummary, clampPositiveInteger } from './snapshot'
 import { queryElements } from './locators'
 
 const DEFAULT_TIMEOUT_MS = 10_000
 const DEFAULT_POLL_MS = 250
+const MAX_TIMEOUT_MS = 30_000
+const MIN_POLL_MS = 100
+const MAX_POLL_MS = 1000
+
+function clampPollInterval(value: unknown): number {
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_POLL_MS
+  return Math.max(MIN_POLL_MS, Math.min(Math.floor(parsed), MAX_POLL_MS))
+}
 
 async function pollUntil(
   timeoutMs: number,
@@ -25,23 +34,23 @@ function snapshotSummary() {
 }
 
 export async function waitForElement(req: WaitForElementRequest): Promise<WaitForConditionResponse> {
-  const timeoutMs = req.timeoutMs ?? DEFAULT_TIMEOUT_MS
-  const pollIntervalMs = req.pollIntervalMs ?? DEFAULT_POLL_MS
+  const timeoutMs = clampPositiveInteger(req.timeoutMs, DEFAULT_TIMEOUT_MS, MAX_TIMEOUT_MS)
+  const pollIntervalMs = clampPollInterval(req.pollIntervalMs)
 
   const result = await pollUntil(timeoutMs, pollIntervalMs, () => queryElements(req).length > 0)
   return {
     success: result.matched,
     matched: result.matched,
     elapsedMs: result.elapsedMs,
-    matches: result.matched ? queryElements(req).slice(0, req.limit ?? 20) : [],
+    matches: result.matched ? queryElements(req).slice(0, clampPositiveInteger(req.limit, 20, MAX_QUERY_LIMIT)) : [],
     snapshotSummary: snapshotSummary(),
     error: result.matched ? undefined : '等待元素超时',
   }
 }
 
 export async function waitForText(req: WaitForTextRequest): Promise<WaitForConditionResponse> {
-  const timeoutMs = req.timeoutMs ?? DEFAULT_TIMEOUT_MS
-  const pollIntervalMs = req.pollIntervalMs ?? DEFAULT_POLL_MS
+  const timeoutMs = clampPositiveInteger(req.timeoutMs, DEFAULT_TIMEOUT_MS, MAX_TIMEOUT_MS)
+  const pollIntervalMs = clampPollInterval(req.pollIntervalMs)
   const needle = req.text.trim().toLowerCase()
 
   const result = await pollUntil(timeoutMs, pollIntervalMs, () => {
@@ -58,8 +67,8 @@ export async function waitForText(req: WaitForTextRequest): Promise<WaitForCondi
 }
 
 export async function waitForDisappear(req: WaitForDisappearRequest): Promise<WaitForConditionResponse> {
-  const timeoutMs = req.timeoutMs ?? DEFAULT_TIMEOUT_MS
-  const pollIntervalMs = req.pollIntervalMs ?? DEFAULT_POLL_MS
+  const timeoutMs = clampPositiveInteger(req.timeoutMs, DEFAULT_TIMEOUT_MS, MAX_TIMEOUT_MS)
+  const pollIntervalMs = clampPollInterval(req.pollIntervalMs)
 
   const result = await pollUntil(timeoutMs, pollIntervalMs, () => queryElements(req as QueryElementsRequest).length === 0)
   return {
@@ -70,4 +79,3 @@ export async function waitForDisappear(req: WaitForDisappearRequest): Promise<Wa
     error: result.matched ? undefined : '等待元素消失超时',
   }
 }
-

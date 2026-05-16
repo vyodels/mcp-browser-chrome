@@ -12,22 +12,50 @@ const BRIDGE_TIMEOUT_MS = Number(process.env.MCP_BROWSER_CHROME_BRIDGE_TIMEOUT_M
 const BRIDGE_TIMEOUT_GRACE_MS = 1500
 const BRIDGE_RETRY_DELAYS_MS = [150, 500, 1200]
 const DEBUG_TOOLS_ENABLED = process.env.MCP_BROWSER_CHROME_DEBUG_TOOLS === '1'
+const STRICT_TARGET_POLICY = process.env.MCP_BROWSER_CHROME_TARGET_POLICY !== 'compat'
+const MAX_WAIT_TIMEOUT_MS = 30_000
+const MIN_POLL_INTERVAL_MS = 100
+const MAX_POLL_INTERVAL_MS = 1000
+const MAX_SELECTOR_LENGTH = 512
+const MAX_QUERY_LIMIT = 100
+const MAX_SNAPSHOT_TEXT_LENGTH = 60_000
+const MAX_SNAPSHOT_HTML_LENGTH = 120_000
+const MAX_SNAPSHOT_CLICKABLES = 500
+
+const TARGET_POLICY_PROPERTIES = {
+  tabId: { type: 'number' },
+  expectedHost: { type: 'string' },
+  expectedOrigin: { type: 'string' },
+  targetPolicy: { type: 'string' },
+}
+
+const OBSERVE_TOOL_NAMES = new Set([
+  'browser_snapshot',
+  'browser_query_elements',
+  'browser_get_element',
+  'browser_debug_dom',
+  'browser_wait_for_element',
+  'browser_wait_for_text',
+  'browser_wait_for_disappear',
+  'browser_wait_for_navigation',
+  'browser_wait_for_url',
+])
 
 const DEFAULT_TOOL_DEFS = [
   ['browser_list_tabs', 'List open tabs across Chrome windows. Pass currentWindowOnly=true to restrict results to the focused window.', { currentWindowOnly: { type: 'boolean' } }],
   ['browser_get_active_tab', 'Get the active Chrome tab.', {}],
-  ['browser_snapshot', 'Read a structured page snapshot with viewport/document metadata and clickable element coordinates.', { tabId: { type: 'number' }, includeHtml: { type: 'boolean' }, includeText: { type: 'boolean' }, maxTextLength: { type: 'number' }, maxHtmlLength: { type: 'number' }, clickableLimit: { type: 'number' } }],
-  ['browser_query_elements', 'Query matching elements by ref, selector, text, or role.', { tabId: { type: 'number' }, ref: { type: 'string' }, selector: { type: 'string' }, text: { type: 'string' }, role: { type: 'string' }, index: { type: 'number' }, limit: { type: 'number' }, visibleOnly: { type: 'boolean' } }],
-  ['browser_get_element', 'Return the first matching element.', { tabId: { type: 'number' }, ref: { type: 'string' }, selector: { type: 'string' }, text: { type: 'string' }, role: { type: 'string' }, index: { type: 'number' }, visibleOnly: { type: 'boolean' } }],
-  ['browser_debug_dom', 'Read a debug DOM snapshot with HTML.', { tabId: { type: 'number' } }],
-  ['browser_wait_for_element', 'Wait until an element appears.', { tabId: { type: 'number' }, ref: { type: 'string' }, selector: { type: 'string' }, text: { type: 'string' }, role: { type: 'string' }, index: { type: 'number' }, limit: { type: 'number' }, visibleOnly: { type: 'boolean' }, timeoutMs: { type: 'number' }, pollIntervalMs: { type: 'number' } }],
-  ['browser_wait_for_text', 'Wait until page text contains the target string.', { tabId: { type: 'number' }, text: { type: 'string' }, timeoutMs: { type: 'number' }, pollIntervalMs: { type: 'number' } }],
-  ['browser_wait_for_navigation', 'Wait for the target tab to finish navigation.', { tabId: { type: 'number' }, timeoutMs: { type: 'number' } }],
-  ['browser_wait_for_disappear', 'Wait until a matching element disappears.', { tabId: { type: 'number' }, ref: { type: 'string' }, selector: { type: 'string' }, text: { type: 'string' }, role: { type: 'string' }, index: { type: 'number' }, limit: { type: 'number' }, visibleOnly: { type: 'boolean' }, timeoutMs: { type: 'number' }, pollIntervalMs: { type: 'number' } }],
-  ['browser_wait_for_url', 'Wait until the tab URL contains the given pattern string. Useful after login redirects or form submissions.', { tabId: { type: 'number' }, pattern: { type: 'string' }, timeoutMs: { type: 'number' } }],
+  ['browser_snapshot', 'Read a structured page snapshot with viewport/document metadata and clickable element coordinates.', { ...TARGET_POLICY_PROPERTIES, includeHtml: { type: 'boolean' }, includeText: { type: 'boolean' }, maxTextLength: { type: 'number' }, maxHtmlLength: { type: 'number' }, clickableLimit: { type: 'number' } }],
+  ['browser_query_elements', 'Query matching elements by ref, selector, text, or role.', { ...TARGET_POLICY_PROPERTIES, ref: { type: 'string' }, selector: { type: 'string' }, text: { type: 'string' }, role: { type: 'string' }, index: { type: 'number' }, limit: { type: 'number' }, visibleOnly: { type: 'boolean' } }],
+  ['browser_get_element', 'Return the first matching element.', { ...TARGET_POLICY_PROPERTIES, ref: { type: 'string' }, selector: { type: 'string' }, text: { type: 'string' }, role: { type: 'string' }, index: { type: 'number' }, visibleOnly: { type: 'boolean' } }],
+  ['browser_wait_for_element', 'Wait until an element appears.', { ...TARGET_POLICY_PROPERTIES, ref: { type: 'string' }, selector: { type: 'string' }, text: { type: 'string' }, role: { type: 'string' }, index: { type: 'number' }, limit: { type: 'number' }, visibleOnly: { type: 'boolean' }, timeoutMs: { type: 'number' }, pollIntervalMs: { type: 'number' } }],
+  ['browser_wait_for_text', 'Wait until page text contains the target string.', { ...TARGET_POLICY_PROPERTIES, text: { type: 'string' }, timeoutMs: { type: 'number' }, pollIntervalMs: { type: 'number' } }],
+  ['browser_wait_for_navigation', 'Wait for the target tab to finish navigation.', { ...TARGET_POLICY_PROPERTIES, timeoutMs: { type: 'number' } }],
+  ['browser_wait_for_disappear', 'Wait until a matching element disappears.', { ...TARGET_POLICY_PROPERTIES, ref: { type: 'string' }, selector: { type: 'string' }, text: { type: 'string' }, role: { type: 'string' }, index: { type: 'number' }, limit: { type: 'number' }, visibleOnly: { type: 'boolean' }, timeoutMs: { type: 'number' }, pollIntervalMs: { type: 'number' } }],
+  ['browser_wait_for_url', 'Wait until the tab URL contains the given pattern string. Useful after login redirects or form submissions.', { ...TARGET_POLICY_PROPERTIES, pattern: { type: 'string' }, timeoutMs: { type: 'number' } }],
 ]
 
 const DEBUG_TOOL_DEFS = [
+  ['browser_debug_dom', 'Debug-only: read a DOM snapshot with HTML.', { ...TARGET_POLICY_PROPERTIES }],
   ['browser_reload_extension', 'Debug-only: reload the browser-mcp Chrome extension so new dist files take effect.', {}],
   ['browser_select_tab', 'Debug-only: activate and focus a Chrome tab by tabId.', { tabId: { type: 'number' } }],
   ['browser_open_tab', 'Debug-only: open or navigate a tab for local fixture setup.', { tabId: { type: 'number' }, windowId: { type: 'number' }, url: { type: 'string' }, active: { type: 'boolean' }, newWindow: { type: 'boolean' } }],
@@ -167,6 +195,63 @@ function retryDelaysForBridgeCall(name) {
   return BRIDGE_RETRY_DELAYS_MS
 }
 
+function clampPositiveNumber(value, fallback, max) {
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback
+  return Math.min(Math.floor(parsed), max)
+}
+
+function clampPollInterval(value) {
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed) || parsed <= 0) return undefined
+  return Math.max(MIN_POLL_INTERVAL_MS, Math.min(Math.floor(parsed), MAX_POLL_INTERVAL_MS))
+}
+
+function clampToolArgs(name, args = {}) {
+  const next = { ...args }
+
+  if (OBSERVE_TOOL_NAMES.has(name)) {
+    if (STRICT_TARGET_POLICY && next.targetPolicy !== 'compat') {
+      next.targetPolicy = 'strict'
+    } else if (!STRICT_TARGET_POLICY && !next.targetPolicy) {
+      next.targetPolicy = 'compat'
+    }
+  }
+
+  if (typeof next.selector === 'string' && next.selector.length > MAX_SELECTOR_LENGTH) {
+    next.selector = next.selector.slice(0, MAX_SELECTOR_LENGTH)
+  }
+
+  if ('limit' in next) {
+    next.limit = clampPositiveNumber(next.limit, 20, MAX_QUERY_LIMIT)
+  }
+
+  if ('timeoutMs' in next) {
+    next.timeoutMs = clampPositiveNumber(next.timeoutMs, 10_000, MAX_WAIT_TIMEOUT_MS)
+  }
+
+  if ('pollIntervalMs' in next) {
+    const poll = clampPollInterval(next.pollIntervalMs)
+    if (poll === undefined) {
+      delete next.pollIntervalMs
+    } else {
+      next.pollIntervalMs = poll
+    }
+  }
+
+  if ('maxTextLength' in next) {
+    next.maxTextLength = clampPositiveNumber(next.maxTextLength, 6000, MAX_SNAPSHOT_TEXT_LENGTH)
+  }
+  if ('maxHtmlLength' in next) {
+    next.maxHtmlLength = clampPositiveNumber(next.maxHtmlLength, 30000, MAX_SNAPSHOT_HTML_LENGTH)
+  }
+  if ('clickableLimit' in next) {
+    next.clickableLimit = clampPositiveNumber(next.clickableLimit, 500, MAX_SNAPSHOT_CLICKABLES)
+  }
+
+  return next
+}
+
 function callBridgeOnce(name, args = {}) {
   return new Promise((resolve, reject) => {
     const socket = createConnection(SOCKET_PATH)
@@ -256,7 +341,7 @@ async function callBridge(name, args = {}) {
 
 async function handleToolCall(id, params) {
   const name = params?.name
-  const args = params?.arguments ?? {}
+  const args = clampToolArgs(name, params?.arguments ?? {})
   if (!name || !TOOLS.find((tool) => tool.name === name)) {
     sendResult(id, {
       content: [{ type: 'text', text: `Unknown tool: ${name}` }],

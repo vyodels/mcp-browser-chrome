@@ -61,21 +61,21 @@ Codex / MCP Client
 
 ### MCP Tools (`browser_*`)
 
-Default `tools/list` exposes only these 11 read-only tools:
+Default `tools/list` exposes only these 10 read-only tools:
 
-`browser_list_tabs`, `browser_get_active_tab`, `browser_snapshot`, `browser_query_elements`, `browser_get_element`, `browser_debug_dom`, `browser_wait_for_element`, `browser_wait_for_text`, `browser_wait_for_disappear`, `browser_wait_for_navigation`, `browser_wait_for_url`
+`browser_list_tabs`, `browser_get_active_tab`, `browser_snapshot`, `browser_query_elements`, `browser_get_element`, `browser_wait_for_element`, `browser_wait_for_text`, `browser_wait_for_disappear`, `browser_wait_for_navigation`, `browser_wait_for_url`
 
 Default runtime must not expose screenshot, cookie, download-history, tab mutation, or extension reload tools.
 
 For local fixture acceptance and one-off debugging only, set `MCP_BROWSER_CHROME_DEBUG_TOOLS=1` to expose:
 
-`browser_reload_extension`, `browser_select_tab`, `browser_open_tab`
+`browser_debug_dom`, `browser_reload_extension`, `browser_select_tab`, `browser_open_tab`
 
 These tab tools are not part of the production/default MCP surface. They are intentionally page-visible because opening, selecting, and focusing tabs can fire lifecycle events.
 
 ### Snapshot + Ref System
 
-`browser_snapshot` now returns a read-only payload with `viewport`, `document`, and `clickables`; top-level results also carry `tabId` plus `target.{tabId,windowId,url,title}` so external consumers can disambiguate the destination tab/window. The `viewport` block exposes page-level geometry observations (`innerWidth/Height`, `outerWidth/Height`, `scrollX/Y`, `devicePixelRatio`, `screenX/Y` as browser-window metrics, and an optional `visualViewport` with pinch-zoom scale + offsets). These fields are not an authoritative HID screen-coordinate mapping contract; absolute mapping belongs to the external HID layer. Each clickable also carries a stable 16-character `signature`, `hitTestState`, and a randomized `clickPoint` guaranteed to lie inside a currently effective hit region. File-related elements also expose semantic fields such as `type`, `accept`, `multiple`, and `download`. `clickables` are descriptive targets for inspection and querying only; refs are no longer used for browser interaction. Refs may still appear in read-only lookup results from `browser_query_elements` / `browser_get_element`, but they do not drive any action tool. `browser_debug_dom` provides verbose DOM detail on demand.
+`browser_snapshot` now returns a read-only payload with `viewport`, `document`, and `clickables`; top-level results also carry `tabId` plus `target.{tabId,windowId,url,title}` so external consumers can disambiguate the destination tab/window. The `viewport` block exposes page-level geometry observations (`innerWidth/Height`, `outerWidth/Height`, `scrollX/Y`, `devicePixelRatio`, `screenX/Y` as browser-window metrics, and an optional `visualViewport` with pinch-zoom scale + offsets). These fields are not an authoritative HID screen-coordinate mapping contract; absolute mapping belongs to the external HID layer. Each clickable also carries a stable 16-character `signature`, `hitTestState`, and a randomized `clickPoint` guaranteed to lie inside a currently effective hit region. File-related elements also expose semantic fields such as `type`, `accept`, `multiple`, and `download`. `clickables` are descriptive targets for inspection and querying only; refs are no longer used for browser interaction. Refs may still appear in read-only lookup results from `browser_query_elements` / `browser_get_element`, but they do not drive any action tool. `browser_debug_dom` provides verbose DOM detail only when debug tools are enabled.
 
 ### Key Design Constraints
 
